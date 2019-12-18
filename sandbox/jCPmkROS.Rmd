@@ -1,0 +1,279 @@
+---
+title: "Two-symbiont model simulations"
+author: "Ross Cunning"
+date: "2/19/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+
+# Load packages
+library(coRal)
+library(plotrix)
+library(scales)
+```
+
+```{r define_functions, eval=T, include=F}
+# Define function for plotting S/H for two-symbiont simulations
+plot_2sh <- function(run) {
+  nsym <- ifelse("list" %in% class(run$S), length(run$S), 1)
+  if (nsym > 1) {
+    totSH <- rowSums(sapply(run$S, "[[", 2))/run$H$H
+  } else {
+    totSH <- run$S$S/run$H$H
+  }
+  plot(time, totSH, ylim=c(0, max(totSH*1.2)), type="l",
+       xlab="Time (days)", ylab="S:H ratio")
+  if (nsym > 1) for (i in 1:nsym) {
+    lines(run$S[[i]]$S/run$H$H ~ time, col=cols[i])
+  }
+  # Find which pars are different btw symbionts and annotate plot
+  d <- names(which(lapply(pars, function(x) length(unique(x))!=1)==T))
+  d <- d[!d %in% "initS"]
+  df <- data.frame(pars[d])
+  text(x=100,y=par("usr")[4]*0.90,paste0(colnames(df), collapse="    "), pos=3)
+  text(x=100,y=par("usr")[4]*0.85,paste0(df[1,], collapse="       "), pos=3, col="blue")
+  text(x=100,y=par("usr")[4]*0.80,paste0(df[2,], collapse="       "), pos=3, col="red")
+  # Annotate S:H ratios
+  at <- c(1,365,730)
+  s1h <- round(with(run, (S[[1]]$S/H$H)[H$time %in% at]), 3)
+  text(at, s1h, s1h, col="blue", cex=0.7)
+  s2h <- round(with(run, (S[[2]]$S/H$H)[H$time %in% at]), 3)
+  text(at, s2h, s2h, col="red", cex=0.7)
+}
+cols=c("blue", "red")
+
+plot_2sh <- function(run) with(run, {
+  plot(time, env.L, type="l", col=scales::alpha("gold", 0.5), axes=F, ylim=c(0, 50), ylab="", xlab="")
+  axis(side=4)
+  par(new=T)
+  plot(time, (S.1+S.2)/H, ylim=c(0, max((S.1+S.2)/H*1.1)), type="l", ylab="S/H", xlab="Days")
+  lines(S.1/H ~ time, col="blue")
+  lines(S.2/H ~ time, col="red")
+  legend("topright", legend=c("sensitive", "tolerant"), col=c("blue", "red"), lty=1, bty="n")
+})
+```
+
+# Parameterize sensitive and tolerant symbionts
+What we know about "tolerant" symbionts:  
+
+* Lower photosynthetic rates
+    + Reduce jCPm from 2.8 to 1.0
+* Lower ROS production
+    + Increase kROS from 80 to 250
+    
+
+```{r parameterize_syms, fig.height=5, fig.width=5}
+# Sensitive symbiont -- default max. photosynthetic rate and ROS production
+ssym <- def_pars(nsym=1)
+ssym$jCPm <- 2.8; ssym$kROS <- 80
+ssympi <- sym_PI(ssym, draw=FALSE)
+# Tolerant symbiont -- lower max. photosynthetic rate, lower ROS production
+tsym <- def_pars(nsym=1)
+tsym$jCPm <- 1.0; tsym$kROS <- 250
+tsympi <- sym_PI(tsym, draw=FALSE)
+
+# Plot Photosynthesis and ROS production for each symbiont as a function of irradiance
+par(mfcol=c(2,2), mar=c(2.1,2.1,1,1), mgp=c(1.1,0.1,0), tcl=-0.2, cex.axis=0.6, cex.lab=0.8)
+plot(ssympi$jCP/ssym$yCL ~ ssympi$jL, type="l", lwd=1,
+     xlab="Irradiance (mol photons/C-mol S/d)",
+     ylab="P gross (mol C/C-mol S/d)", ylim=c(0,17),
+     main="Sensitive symbiont", col.main="blue")
+plot(ssympi$cROS ~ ssympi$jL, type="l", lwd=1,
+     xlab="Irradiance (mol photons/C-mol S/d)",
+     ylab="ROS (relative)", ylim=c(1,3.2))
+plot(tsympi$jCP/tsym$yCL ~ tsympi$jL, type="l", lwd=1,
+     xlab="Irradiance (mol photons/C-mol S/d)",
+     ylab="P gross (mol C/C-mol S/d)", ylim=c(0,17),
+     main="Tolerant symbiont", col.main="red")
+plot(tsympi$cROS ~ tsympi$jL, type="l", lwd=1,
+     xlab="Irradiance (mol photons/C-mol S/d)",
+     ylab="ROS (relative)", ylim=c(1,3.2))
+```
+
+PI and ROS production curves are consistent with expectations of a tolerant symbiont: maximum photosynthetic rate is reduced, but photoinhibition and ROS production are reduced at high light levels.
+But what is their behavior when we put these symbionts into a coral host?
+
+# Compare seasonal dynamics with either sensitive or tolerant symbiont
+```{r seasonal, fig.width=5, fig.height=5}
+# Define simulation environment (seasonal fluctuation in light)
+time <- seq(1,365,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(30,15,3))
+
+# Run simulations with sensitive or tolerant symbiont
+run_s_s <- run_coral(time=time, env=env, pars=replace(ssym, "initS", 0.15))
+run_s_t <- run_coral(time=time, env=env, pars=replace(tsym, "initS", 0.22))
+
+# Plot
+par(mfcol=c(3,2), mar=c(1.2,3,1,1), mgp=c(1.5,0.2,0), tcl=-0.2, cex.axis=1, cex.lab=1.2)
+with(run_s_s, plot(env.L ~ time, col="gold", type="l", ylim=c(0, 50)))
+title(main="Sensitive symbiont", col.main="blue")
+with(run_s_s, plot(S/H ~ time, type="l", ylim=c(0,0.40)))
+with(run_s_s, plot(dH.Hdt ~ time, type="l", ylim=c(0,0.04)))
+with(run_s_t, plot(env.L ~ time, col="gold", type="l", ylim=c(0, 50)))
+title(main="Tolerant symbiont", col.main="red")
+with(run_s_t, plot(S/H ~ time, type="l", ylim=c(0,0.40)))
+with(run_s_t, plot(dH.Hdt ~ time, type="l", ylim=c(0,0.04)))
+
+# Calculate average difference in S/H ratio and host growth
+mean(with(run_s_t, S/H) / with(run_s_s, S/H))  # Tolerant symbiont 1.5x higher S/H (annual mean)
+mean(with(run_s_s, dH.Hdt) / with(run_s_t, dH.Hdt))  # Coral with sensitive symbiont grows 13% faster (annual mean)
+```
+
+What if growth rate is increased?
+# Compare seasonal dynamics with either sensitive or tolerant symbiont
+```{r incr_gr_s, fig.width=5, fig.height=5}
+# Define simulation environment (seasonal fluctuation in light)
+time <- seq(1,365,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(30,15,3))
+
+# Run simulations with sensitive or tolerant symbiont
+run_s_s <- run_coral(time=time, env=env, pars=replace(ssym, "initS", 0.15))
+run_s_t <- run_coral(time=time, env=env, pars=replace(tsym, "initS", 0.22))
+
+# Plot
+par(mfcol=c(3,2), mar=c(1.2,3,1,1), mgp=c(1.5,0.2,0), tcl=-0.2, cex.axis=1, cex.lab=1.2)
+with(run_s_s, plot(env.L ~ time, col="gold", type="l", ylim=c(0, 50)))
+title(main="Sensitive symbiont", col.main="blue")
+with(run_s_s, plot(S/H ~ time, type="l", ylim=c(0,0.40)))
+with(run_s_s, plot(dH.Hdt ~ time, type="l", ylim=c(0,0.04)))
+with(run_s_t, plot(env.L ~ time, col="gold", type="l", ylim=c(0, 50)))
+title(main="Tolerant symbiont", col.main="red")
+with(run_s_t, plot(S/H ~ time, type="l", ylim=c(0,0.40)))
+with(run_s_t, plot(dH.Hdt ~ time, type="l", ylim=c(0,0.04)))
+
+# Calculate average difference in S/H ratio and host growth
+mean(with(run_s_t, S/H) / with(run_s_s, S/H))  # Tolerant symbiont 1.5x higher S/H (annual mean)
+mean(with(run_s_s, dH.Hdt) / with(run_s_t, dH.Hdt))  # Coral with sensitive symbiont grows 13% faster (annual mean)
+```
+
+Behavior is consistent with expectations: coral with tolerant symbiont has higher S/H ratio but grows slower than coral with sensitive symbiont. What about under stressful conditions (very high light levels)?
+
+### Increase summertime maximum light to stressful levels
+```{r bleaching, fig.width=5, fig.height=5}
+# Define simulation environment (seasonal fluctuation in light)
+time <- seq(1,365,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(50,15,3))
+
+# Run simulations with sensitive or tolerant symbiont
+run_s_s <- run_coral(time=time, env=env, pars=replace(ssym, "initS", 0.15))
+run_s_t <- run_coral(time=time, env=env, pars=replace(tsym, "initS", 0.22))
+
+# Plot
+par(mfcol=c(3,2), mar=c(1.2,3,1,1), mgp=c(1.5,0.2,0), tcl=-0.2, cex.axis=1, cex.lab=1.2)
+with(run_s_s, plot(env.L ~ time, col="gold", type="l", ylim=c(0, 50)))
+title(main="Sensitive symbiont", col.main="blue")
+with(run_s_s, plot(S/H ~ time, type="l", ylim=c(0,0.40)))
+with(run_s_s, plot(dH.Hdt ~ time, type="l", ylim=c(0,0.04)))
+with(run_s_t, plot(env.L ~ time, col="gold", type="l", ylim=c(0, 50)))
+title(main="Tolerant symbiont", col.main="red")
+with(run_s_t, plot(S/H ~ time, type="l", ylim=c(0,0.40)))
+with(run_s_t, plot(dH.Hdt ~ time, type="l", ylim=c(0,0.04)))
+```
+
+Coral with sensitive symbiont bleaches, coral with tolerant symbiont does not.
+What if both symbionts are present -- does shuffling occur?
+
+# Test symbiont shuffling
+```{r shuffling, eval=T}
+# Get default parameters for two symbionts
+pars <- def_pars(nsym=2)
+
+# Make symbiont 2 have lower jCPm and higher kROS (i.e., tolerant symbiont)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+
+# Make symbiont 2 start with very low biomass
+pars$initS[1:2] <- c(0.2, 0.001)
+
+# Define high light-stress environment for simulation
+time <- seq(1,1000,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(20,15,4))
+
+# Run simulation
+run3 <- run_coral(time=time, env=env, pars=pars)
+
+# Plot results
+par(mfrow=c(1,1), mar=c(3,3,1,3), mgp=c(1.75,0.5,0))
+plot_2sh(run3)
+```
+
+Yes, shuffling takes place, followed by reversion to sensitive symbiont.
+How long does it take a coral with 99% tolerant symbiont to revert to 99% sensitive symbiont?
+
+```{r loss1, eval=T}
+# Get default parameters for two symbionts
+pars <- def_pars(nsym=2)
+
+# Make symbiont 2 have lower jCPm and higher kROS (i.e., tolerant symbiont)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+
+# Start with 99% tolerant, 1% sensitive symbiont
+pars$initS[1:2] <- c(0.002, 0.198)
+
+# Define high light-stress environment for simulation
+time <- seq(1,3650,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(30,10,3))
+
+# Run simulation
+run3 <- run_coral(time=time, env=env, pars=pars)
+
+# Plot results
+par(mar=c(3,3,1,3), mgp=c(1.75,0.5,0))
+plot_2sh(run3)
+```
+
+Tolerant symbiont is gradually lost from the coral over about 15 years.
+
+```{r loss2, eval=T}
+# Get default parameters for two symbionts
+pars <- def_pars(nsym=2)
+
+# Make symbiont 2 have lower jCPm and higher kROS (i.e., tolerant symbiont)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+
+# Start with 99% tolerant, 1% sensitive symbiont
+pars$initS[1:2] <- c(0.002, 0.198)
+
+# Define high light-stress environment for simulation
+time <- seq(1,3650,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(20,20,0))
+
+# Run simulation
+run3 <- run_coral(time=time, env=env, pars=pars)
+
+# Plot results
+par(mar=c(3,3,1,3), mgp=c(1.75,0.5,0))
+plot_2sh(run3)
+```
+
+Tolerant symbiont is lost in about 5 years at constant, intermediate light level.
+
+```{r loss3, eval=T}
+# Get default parameters for two symbionts
+pars <- def_pars(nsym=2)
+
+# Make symbiont 2 have lower jCPm and higher kROS (i.e., tolerant symbiont)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+
+# Start with 99% tolerant, 1% sensitive symbiont
+pars$initS[1:2] <- c(0.002, 0.198)
+
+# Define high light-stress environment for simulation
+time <- seq(1,3650,0.1)
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(10,10,0))
+
+# Run simulation
+run3 <- run_coral(time=time, env=env, pars=pars)
+
+# Plot results
+par(mar=c(3,3,1,3), mgp=c(1.75,0.5,0))
+plot_2sh(run3)
+```
+
+Tolerant symbiont is lost in about 3 years at constant, low light level.
