@@ -1,0 +1,254 @@
+---
+title: "Symbiont shuffling in a cyclical environment with repeated mild stress"
+author: "Ross Cunning and Alexandra Brown"
+date: "3/2/2020"
+output: html_document
+---
+```
+
+```{r}
+# Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE,fig.width=30, fig.height=30) 
+
+
+# Load packages
+library(coRal)
+library(plotrix)
+library(scales)
+require(foreach)
+require(parallel)
+require(doParallel)
+library(tidyverse)
+library(plot.matrix)
+
+# Make plots larger
+#options(repr.plot.res=400)
+```
+
+```{r}
+# Find the mean of value over a certain year/cycle of environmental change
+# Takes as input:
+# - value, a list of values the variable of interest takes over time
+# - time, a list of time points the variable was recorded at
+# - envPeriod, the period of the cycle of environmental change (e.g. 365 for a year)
+# - cycleNumber, the year or (cycleNumber)th cycle of environmental change over which to average value
+meanOverCycle <- function(value, time, envPeriod, cycleNumber) {
+    focalCycle <- ((time > envPeriod*(cycleNumber - 1)) & (time <= envPeriod * cycleNumber))
+    meanValue <- mean(value[focalCycle])
+    return(meanValue)
+}
+```
+
+```{r}
+cols=c("blue", "red")
+
+plot_2sh <- function(run) with(run, {
+  plot(time, env.L, type="l", col=scales::alpha("gold", 0.5), axes=F, ylim=c(0, 50), ylab="", xlab="")
+  axis(side=4)
+  par(new=T)
+  plot(time, (S.1+S.2)/H, ylim=c(0, max((S.1+S.2)/H*1.1)), type="l", ylab="S/H", xlab="Days")
+  lines(S.1/H ~ time, col="blue")
+  lines(S.2/H ~ time, col="red")
+  legend("topright", legend=c("sensitive", "tolerant"), col=c("blue", "red"), lty=1, bty="n")
+})
+```
+
+## At least under some repeated, mild stress shuffling can occur
+
+```{r, fig.height = 5, fig.width = 5}
+# Make symbiont 2 have lower jCPm and higher kROS (i.e., tolerant symbiont)
+time <- seq(1,365*24,0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+
+# Make symbiont 2 start with very low biomass
+pars$initS[1:2] <- c(0.2, 0.001)
+
+# Define mild, repeated stress for simulation
+env <- init_env(time=time, X=c(2e-7,2e-7,0), N=c(1e-7,1e-7,0), L=c(15,35,2))
+
+# Run simulation
+run <- run_coral(time=time, env=env, pars=pars)
+
+# Plot results
+par(mfrow=c(1,1), mar=c(3,3,1,3), mgp=c(1.75,0.5,0))
+plot_2sh(run)
+```
+
+## Investigate where shuffling (or reversion to a sensitive symbiont occurs)
+
+
+Will look over:
+* a range of maximum and minimum yearly light values
+* both high and low initial sensitive:tolerant symbiont ratios (to check for conditions that allow switching to the tolerant symbiont or reversion to the sensitive symbiont)
+* both high and low initial total symbiont:host ratios (to check for hysteresis)
+* 50, to see how quickly symbiont frequencies change
+
+```{r}
+time <- seq(1,50*365,0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+df <- expand.grid("Lmin"=seq(5, 15, 5), "Lmax" = seq(20, 40, 5), "initSH" = c(0.1, 0.0001), "initST" = c(1000, 0.001))
+focalYears <- list("year5"=5, "year10"=10, "year20"=20, "year30"=30, "year50"=50)
+
+# Set up cluster for parallel processing
+cl <- makeCluster(detectCores())  # Initiate cluster
+registerDoParallel(cl)
+  
+# Run simulations in parallel for each combination of "at" values
+start <- proc.time()  # Start timer...
+
+# Calculate steady states...
+steady_states <- foreach(i=1:nrow(df), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(df[i, "Lmin"], df[i, "Lmax"], 2), N=c(1e-7, 1e-7, 0), X=c(1e-7, 1e-7, 0))
+    tempPars <- pars
+    tempPars$initS[1] <- df[i, "initSH"] * df[i, "initST"]/(df[i, "initST"] + 1)
+    tempPars$initS[2] <- df[i, "initSH"] * 1/(df[i, "initST"] + 1)
+    run <- coRal::run_coral(time=time, env=env, pars=tempPars)
+    
+    gr <- lapply(focalYears, function(x) {meanOverCycle(run$dH.Hdt, time, 365, x)})
+    host <- lapply(focalYears, function(x) {meanOverCycle(run$H, time, 365, x)})
+    ssymb <- lapply(focalYears, function(x) {meanOverCycle(run$S.1, time, 365, x)})
+    tsymb <- lapply(focalYears, function(x) {meanOverCycle(run$S.2, time, 365, x)})
+    totSymb <- Map("+", ssymb, tsymb)
+    shratio <- Map("/", totSymb, host)
+    stratio <- Map("/", ssymb, tsymb)
+    
+   list(Lmin=df[i, "Lmin"], Lmax=df[i, "Lmax"], initSH=df[i, "initSH"], initST=df[i, "initST"],
+        gr=gr, host=host, ssymb=ssymb, tsymb=tsymb, totSymb=totSymb, shratio=shratio, stratio=stratio)
+}
+stopCluster(cl)  # Stop cluster
+print(proc.time() - start)  # Print time elapsed
+dfSteadyStates <- data.frame(steady_states, row.names=NULL)
+```
+
+## Plot the host growth rate
+
+```{r}
+par(mfcol=c(4, 5))
+for (year in c("year5", "year10", "year20", "year30", "year50")) {
+    # Get the matrices for the plots: 4 initial conditions high/low initial S:H x high/low initial S:T
+    #low S:H, low ST
+    lowSHlowSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.0001) & (dfSteadyStates$initST == 0.001),"gr"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+  
+    #high S:H, low ST
+    highSHlowSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.1) & (dfSteadyStates$initST == 0.001),"gr"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    #low S:H, high ST
+    lowSHhighSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.0001) & (dfSteadyStates$initST == 1000),"gr"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    #high S:H, high ST
+    highSHhighSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.1) & (dfSteadyStates$initST == 1000),"gr"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    # Make the plots
+    plot(lowSHlowSTinit[c(3, 2, 1),], breaks=c(0.013, 0.014, 0.015, 0.016, 0.017, 0.018),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit low S:H,\nlow S:T"))
+    
+    plot(highSHlowSTinit[c(3, 2, 1),], breaks=c(0.013, 0.014, 0.015, 0.016, 0.017, 0.018),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit high S:H,\nlow S:T"))
+    
+    plot(lowSHhighSTinit[c(3, 2, 1),],breaks=c(0.013, 0.014, 0.015, 0.016, 0.017, 0.018),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit low S:H,\nhigh S:T"))
+    
+    plot(highSHhighSTinit[c(3, 2, 1),], breaks=c(0.013, 0.014, 0.015, 0.016, 0.017, 0.018),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit high S:H,\nhigh S:T"))
+}
+```
+
+## Plot the total symbiont: host ratio
+
+```{r}
+par(mfcol=c(4, 5))
+for (year in c("year5", "year10", "year20", "year30", "year50")) {
+    # Get the matrices for the plots: 4 initial conditions high/low initial S:H x high/low initial S:T
+    #low S:H, low ST
+    lowSHlowSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.0001) & (dfSteadyStates$initST == 0.001),"shratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+  
+    #high S:H, low ST
+    highSHlowSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.1) & (dfSteadyStates$initST == 0.001),"shratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    #low S:H, high ST
+    lowSHhighSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.0001) & (dfSteadyStates$initST == 1000),"shratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    #high S:H, high ST
+    highSHhighSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.1) & (dfSteadyStates$initST == 1000),"shratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    # Make the plots
+    plot(lowSHlowSTinit[c(3, 2, 1),], breaks=c(0.14, 0.16, 0.18, 0.2, 0.22, 0.24, 0.26, 0.28),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit low S:H,\nlow S:T"))
+    
+    plot(highSHlowSTinit[c(3, 2, 1),], breaks=c(0.14, 0.16, 0.18, 0.2, 0.22, 0.24, 0.26, 0.28),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit high S:H,\nlow S:T"))
+    
+    plot(lowSHhighSTinit[c(3, 2, 1),], breaks=c(0.14, 0.16, 0.18, 0.2, 0.22, 0.24, 0.26, 0.28),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit low S:H,\nhigh S:T"))
+    
+    plot(highSHhighSTinit[c(3, 2, 1),], breaks=c(0.14, 0.16, 0.18, 0.2, 0.22, 0.24, 0.26, 0.28),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit high S:H,\nhigh S:T"))
+}
+```
+
+## Plot log(sensitive: tolerant symbiont ratio)
+
+```{r}
+par(mfcol=c(4, 5))
+for (year in c("year5", "year10", "year20", "year30", "year50")) {
+    # Get the matrices for the plots: 4 initial conditions high/low initial S:H x high/low initial S:T
+    #low S:H, low ST
+    lowSHlowSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.0001) & (dfSteadyStates$initST == 0.001),"stratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+  
+    #high S:H, low ST
+    highSHlowSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.1) & (dfSteadyStates$initST == 0.001),"stratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    #low S:H, high ST
+    lowSHhighSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.0001) & (dfSteadyStates$initST == 1000),"stratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    #high S:H, high ST
+    highSHhighSTinit = matrix(as.numeric(
+    lapply(dfSteadyStates[(dfSteadyStates$initSH == 0.1) & (dfSteadyStates$initST == 1000),"stratio"], function(x) {x[[year]]})),
+       nrow=3, dimnames=list(dfSteadyStates$Lmin[1:3], dfSteadyStates$Lmax[seq(1, 15, 3)]))
+    
+    # Make the plots
+    plot(log(lowSHlowSTinit[c(3, 2, 1),]), breaks=c(-200, -5, -3, -2, -1, 0, 1, 2, 3, 5, 200),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit low S:H,\nlow S:T"))
+    
+    plot(log(highSHlowSTinit[c(3, 2, 1),]), breaks=c(-200, -5, -3, -2, -1, 0, 1, 2, 3, 5, 200),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit high S:H,\nlow S:T"))
+    
+    plot(log(lowSHhighSTinit[c(3, 2, 1),]), breaks=c(-200, -5, -3, -2, -1, 0, 1, 2, 3, 5, 200),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit low S:H,\nhigh S:T"))
+    
+    plot(log(highSHhighSTinit[c(3, 2, 1),]), breaks=c(-200, -5, -3, -2, -1, 0, 1, 2, 3, 5, 200),
+        xlab="Maximum light", ylab="Minimum light", main=paste(year, ",\ninit high S:H,\nhigh S:T"))
+}
+```
+
+```{r}
+
+```

@@ -1,0 +1,223 @@
+---
+title: "kCO2 investigation"
+author: "Ross Cunning and Alexandra Brown"
+date: "4/14/2020"
+output: html_document
+---
+
+```{r}
+#Set kintr options
+#knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=8, fig.height=8)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+
+options(repr.plot.res=200, repr.plot.height=4)
+```
+I want to investigate how kCO2 affects the results since Roger says they're sensitive to it
+
+
+# Step 1: Figure out the range to vary kCO2 over
+
+
+In Cunning et al. 2017, Ross varies the parameter over 0.5 to 1.5x its "default" value
+
+
+# Step 2: Set up the code to vary kCO2
+
+
+## Plotting function, for help visualizing the data
+
+```{r}
+plot_2sh <- function(run) with(run, {
+  plot(time, env.L, type="l", col=scales::alpha("gold", 0.5), axes=F, ylim=c(0, 50), ylab="", xlab="")
+  axis(side=4)
+  par(new=T)
+  plot(time, (S.1+S.2)/H, ylim=c(0, max((S.1+S.2)/H*1.1)), type="l", ylab="S/H", xlab="Days")
+  lines(S.1/H ~ time, col="blue")
+  lines(S.2/H ~ time, col="red")
+  legend("topright", legend=c("sensitive", "tolerant"), col=c("blue", "red"), lty=1, bty="n")
+})
+```
+
+## Run the simulation for several values of kCO2
+
+```{r}
+##### Define simulation environment
+time <- seq(1,3000,0.1)
+env <- init_env(time=time, X=c(0,0,0), N=c(5e-7,5e-7,0), L=c(15,15,0))
+
+pars <- def_pars(nsym=2)
+
+# Make symbiont 2 have lower jCPm and higher kROS (i.e., tolerant symbiont)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+pars$initS[1:2] <- 0.5e-4
+```
+
+### kCO2 = default (10)
+
+```{r}
+run_kCO2_10 <- run_coral(time=time, env=env,pars=pars)
+```
+
+```{r}
+par(mfrow=c(1, 2), pty="s")
+plot_2sh(run_kCO2_10)
+
+plot(run_kCO2_10$time, run_kCO2_10$dH.Hdt, type="l", ylim=c(-0.1, 0.1), col="blue")
+lines(run_kCO2_10$time, rep(0, length(run_kCO2_10$time)))
+```
+
+### kCO2 = 9
+
+```{r}
+run_kCO2_9 <- run_coral(time=time, env=env,pars=replace(pars, "kCO2", 9))
+```
+
+```{r}
+par(mfrow=c(1, 2), pty="s")
+plot_2sh(run_kCO2_9)
+plot(run_kCO2_9$time, run_kCO2_9$dH.Hdt, type="l", ylim=c(-0.1, 0.1), col="blue")
+lines(run_kCO2_9$time, rep(0, length(run_kCO2_9$time)))
+```
+
+### kCO2 = 11
+
+```{r}
+run_kCO2_11 <- run_coral(time=time, env=env,pars=replace(pars, "kCO2", 11))
+```
+
+```{r}
+par(mfrow=c(1, 2), pty="s")
+plot_2sh(run_kCO2_11)
+
+plot(run_kCO2_11$time, run_kCO2_11$dH.Hdt, type="l", ylim=c(-0.1, 0.1), col="blue")
+lines(run_kCO2_11$time, rep(0, length(run_kCO2_11$time)))
+```
+
+### kCO2 = 12
+
+```{r}
+run_kCO2_12 <- run_coral(time=time, env=env,pars=replace(pars, "kCO2", 12))
+```
+
+```{r}
+par(mfrow=c(1, 2), pty="s")
+plot_2sh(run_kCO2_12)
+
+plot(run_kCO2_12$time, run_kCO2_12$dH.Hdt, type="l", ylim=c(-0.1, 0.1), col="blue")
+lines(run_kCO2_12$time, rep(0, length(run_kCO2_12$time)))
+```
+
+# Step 3: Do a proper parameter sweep
+
+
+## A function for detecting when the host growth rate changes sign
+
+```{r}
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+}
+```
+
+## Parameter sweep!
+
+
+Record growth rate, the last time the growth rate changed sign, the host:symbiont ratio, and the sensitive:tolerant symbiont ratio
+
+
+Check how different values of kCO2 affect the results for:
+* different levels of light
+* different levels of nitrogen
+* different levels of food
+
+
+### Two symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 20, 2), "N"=seq(2e-7, 10e-7, 2e-7), "X"=c(0, 1e-7), "kCO2"=seq(5, 15, 1))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars()
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+pars$initS[1:2] <- 0.5e-4
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, 
+                           L=c(inputDF[i, "L"], inputDF[i, "L"], 0), 
+                           N=c(inputDF[i, "N"], inputDF[i, "N"], 0), 
+                           X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+   
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+    
+    
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+    
+    gr_changes_list <- detect_gr_change(run)
+    last_gr_change <- NA
+    if (length(gr_changes_list) > 0) {
+        last_gr_change <- gr_changes_list[length(gr_changes_list)]
+    }
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"], 
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbs <- data.frame(twoSymbsOutput, row.names=NULL)
+```
+
+### Host growth rate
+
+```{r}
+par(mfrow=c(4, 6), pty="s", mai=c(0,0,1,0))
+
+for (kCO2 in seq(5, 15, 1)) {
+    for (X in c(0, 1e-7)) {
+        data <- twoSymbs$gr[(twoSymbs$kCO2==kCO2) & (twoSymbs$X==X)]
+        mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+        mat <- mat[nrow(mat):1,]
+
+        colmax = max(as.numeric(twoSymbs$gr))
+        colbreak = colmax/10
+        plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), na.col="lightgray", na.print=FALSE,
+             breaks=seq(0, colmax, colbreak), col=viridis(10),
+             key=NULL, fmt.cell='%.2f')
+    }
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"), 
+       fill=c(viridis(10), "lightgray"), 
+                       title="Host growth rate", cex=1.33, ncol=2)
+```
+
+```{r}
+twoSymbs$kCO2
+```
+
+```{r}
+
+```

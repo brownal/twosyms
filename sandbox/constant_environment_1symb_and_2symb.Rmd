@@ -1,0 +1,466 @@
+---
+title: "Symbiont shuffling in a constant environment"
+author: "Ross Cunning and Alexandra Brown"
+date: "3/26/2020"
+output: html_document
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=8, fig.height=8)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+```
+# One symbiont case: Can we get it to match Cunning et al. 2017 Fig. 3?
+## Use run_coral_ss to find steady state host growth rates for a range of initial symbiont:host biomass ratios
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 50, 5), "N"=seq(0, 4e-6, 5e-7), "initSH" = c(1, 0.5, 0.25, 0.125, 0.1, 0.05, 0.001, 0.0001))
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+initSHsweepOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    run <- coRal::run_coral_ss(env=list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=0), 
+                               pars=replace(coRal::def_pars(), "initS", inputDF[i, "initSH"]))
+    gr <- run$H$dH.Hdt[length(run$H$dH.Hdt)]
+    finalSH <- run$S$S[length(run$S$S)] / run$H$H[length(run$H$H)]
+    endTime <- (length(run$H$H) - 1)*run$dt
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "initSH"=inputDF[i, "initSH"], "gr"=gr, "finalSH"=finalSH, "endTime"=endTime)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+initSHsweep <- data.frame(initSHsweepOutput, row.names=NULL)
+```
+
+## Using an initial symbiont:host ratio of 1 recovers Cunning et al. 2017 Figure 3
+As the initial symbiont:ratio decreases, more combinations of light/nitrogen levels cause the coral to bleach.
+
+(Prey = 0 for all results.)
+
+```{r}
+par(mfrow=c(3, 3), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.5, 0.25, 0.125, 0.1, 0.05, 0.001, 0.0001)) {
+    data <- initSHsweep$gr[initSHsweep$initSH==initSH]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(initSHsweep$L), unique(initSHsweep$N)))
+    mat <- mat[nrow(mat):1,]
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), 
+         breaks=seq(-0.1, 0.1, 0.02), col=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=seq(-0.1, 0.1, 0.02), fill=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+      title="Host growth rate", cex=1.33, ncol=2)
+```
+
+# Two symbiont case
+
+
+Steady states can't be found with run_coral_ss for the two symbiont case (it only works with 1 symbiont). However, it looks like it look at most 2604.4 days for the one-symbiont case to equilibrate.
+
+```{r}
+hist(as.numeric(initSHsweep$endTime))
+min(as.numeric(initSHsweep$endTime))
+max(as.numeric(initSHsweep$endTime))
+```
+
+##  Run the two-symbiont simulation for 3000 days.
+Keep track of the host growth rate, sensitive:tolerate symbiont ratio, and whether the simulation has equilibrated at the end.
+
+(Sensitive:tolerant symbiont ratio initialized at 0.5 in all cases. Prey set to 0.)
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 50, 5), "N"=seq(0, 4e-6, 5e-7), "initSH" = c(1, 0.5, 0.25, 0.125, 0.1, 0.05, 0.001, 0.0001))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0), N=c(inputDF[i, "N"], inputDF[i, "N"], 0), X=c(0, 0, 0))
+    modifiedPars <- pars
+    modifiedPars$initS[1:2] <- c(0.5, 0.5)*inputDF[i, "initSH"]
+    
+    run <- coRal::run_coral(time=time, env=env, pars=modifiedPars)
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+    
+    
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "initSH"=inputDF[i, "initSH"], "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbs <- data.frame(twoSymbsOutput, row.names=NULL)
+```
+
+## All simulations equilibrated by the end
+
+```{r}
+all(as.logical(twoSymbs$changeH))
+all(as.logical(twoSymbs$changeS1))
+all(as.logical(twoSymbs$changeS2))
+```
+
+## Host growth rate looks similar to the 1-symbiont case, except with a few more cases of bleaching
+
+Note the differences between the 1- and 2-symbiont case when the initial S:H = 0.25 or 0.125
+
+```{r}
+par(mfrow=c(3, 3), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.5, 0.25, 0.125, 0.1, 0.05, 0.001, 0.0001)) {
+    data <- twoSymbs$gr[initSHsweep$initSH==initSH]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    mat <- mat[nrow(mat):1,]
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), 
+         breaks=seq(-0.1, 0.1, 0.02), col=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=seq(-0.1, 0.01, 0.02), fill=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+      title="Host growth rate", cex=1.33, ncol=2)
+```
+
+## For unbleached host, there are much fewer environmental conditions where the tolerant symbiont is dominant
+
+```{r}
+par(mfrow=c(3, 3), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.5, 0.25, 0.125, 0.1, 0.05, 0.001, 0.0001)) {
+    growth <- twoSymbs$gr[initSHsweep$initSH==initSH]
+    data <- twoSymbs$finalST[initSHsweep$initSH==initSH]
+    
+    growthmat <- matrix(as.numeric(growth), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    growthmat <- mat[nrow(growthmat):1,]
+    mat <- matrix(log10(as.numeric(data)), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    mat <- mat[nrow(mat):1,]
+    
+    for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+            if (growthmat[[i, j]] < 0) {
+                mat[[i, j]] <- NA
+            }
+        }
+    }
+    
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), na.col="gray",
+         breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=brewer.pal(length(c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000)),"RdBu"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000, "NA"), 
+       fill=c(brewer.pal(length(c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000)),"RdBu"), "gray")
+      title="log10 S:T ratio", cex=1.33, ncol=2)
+```
+
+```{r}
+
+```
+
+# What happens with increased food? (X = 2e-7)
+
+
+## One symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 50, 5), "N"=seq(0, 4e-6, 5e-7), "initSH" = c(1, 0.0001))
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+initSHsweepOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    run <- coRal::run_coral_ss(env=list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=2e-7), 
+                               pars=replace(coRal::def_pars(), "initS", inputDF[i, "initSH"]))
+    gr <- run$H$dH.Hdt[length(run$H$dH.Hdt)]
+    finalSH <- run$S$S[length(run$S$S)] / run$H$H[length(run$H$H)]
+    endTime <- (length(run$H$H) - 1)*run$dt
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "initSH"=inputDF[i, "initSH"], "gr"=gr, "finalSH"=finalSH, "endTime"=endTime)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+initSHsweep <- data.frame(initSHsweepOutput, row.names=NULL)
+```
+
+```{r}
+par(mfrow=c(3, 1), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.0001)) {
+    data <- initSHsweep$gr[initSHsweep$initSH==initSH]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(initSHsweep$L), unique(initSHsweep$N)))
+    mat <- mat[nrow(mat):1,]
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), 
+         breaks=seq(-0.1, 0.1, 0.02), col=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=seq(-0.1, 0.1, 0.02), fill=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+      title="Host growth rate", cex=1.33, ncol=2)
+```
+
+## Two-symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 50, 5), "N"=seq(0, 4e-6, 5e-7), "initSH" = c(1, 0.0001))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0), N=c(inputDF[i, "N"], inputDF[i, "N"], 0), X=c(2e-7, 2e-7, 0))
+    modifiedPars <- pars
+    modifiedPars$initS[1:2] <- c(0.5, 0.5)*inputDF[i, "initSH"]
+    
+    run <- coRal::run_coral(time=time, env=env, pars=modifiedPars)
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+    
+    
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "initSH"=inputDF[i, "initSH"], "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbs <- data.frame(twoSymbsOutput, row.names=NULL)
+```
+
+### All simulations equilibrated by the end
+
+```{r}
+all(as.logical(twoSymbs$changeH))
+all(as.logical(twoSymbs$changeS1))
+all(as.logical(twoSymbs$changeS2))
+```
+
+### Host growth rate
+
+```{r}
+par(mfrow=c(3, 1), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.0001)) {
+    data <- twoSymbs$gr[initSHsweep$initSH==initSH]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    mat <- mat[nrow(mat):1,]
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), 
+         breaks=seq(-0.1, 0.1, 0.02), col=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=seq(-0.1, 0.01, 0.02), fill=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+      title="Host growth rate", cex=1.33, ncol=2)
+```
+
+### Sensitive:tolerant symbiont ratio
+
+```{r}
+par(mfrow=c(3, 1), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.0001)) {
+    growth <- twoSymbs$gr[initSHsweep$initSH==initSH]
+    data <- twoSymbs$finalST[initSHsweep$initSH==initSH]
+    
+    growthmat <- matrix(as.numeric(growth), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    growthmat <- mat[nrow(growthmat):1,]
+    mat <- matrix(log10(as.numeric(data)), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    mat <- mat[nrow(mat):1,]
+    
+    for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+            if (growthmat[[i, j]] < 0) {
+                mat[[i, j]] <- NA
+            }
+        }
+    }
+    
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), na.col="gray",
+         breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=brewer.pal(length(c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000)),"RdBu"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000, "NA"), 
+       fill=c(brewer.pal(length(c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000)),"RdBu"), "gray")
+      title="log10 S:T ratio", cex=1.33, ncol=2)
+```
+
+# High food case? (X = 4e-7)
+
+
+## One symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 50, 5), "N"=seq(0, 4e-6, 5e-7), "initSH" = c(1, 0.0001))
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+initSHsweepOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    run <- coRal::run_coral_ss(env=list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=4e-7), 
+                               pars=replace(coRal::def_pars(), "initS", inputDF[i, "initSH"]))
+    gr <- run$H$dH.Hdt[length(run$H$dH.Hdt)]
+    finalSH <- run$S$S[length(run$S$S)] / run$H$H[length(run$H$H)]
+    endTime <- (length(run$H$H) - 1)*run$dt
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "initSH"=inputDF[i, "initSH"], "gr"=gr, "finalSH"=finalSH, "endTime"=endTime)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+initSHsweep <- data.frame(initSHsweepOutput, row.names=NULL)
+```
+
+```{r}
+par(mfrow=c(3, 1), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.0001)) {
+    data <- initSHsweep$gr[initSHsweep$initSH==initSH]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(initSHsweep$L), unique(initSHsweep$N)))
+    mat <- mat[nrow(mat):1,]
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), 
+         breaks=seq(-0.1, 0.1, 0.02), col=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=seq(-0.1, 0.1, 0.02), fill=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+      title="Host growth rate", cex=1.33, ncol=2)
+```
+
+## Two-symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 50, 5), "N"=seq(0, 4e-6, 5e-7), "initSH" = c(1, 0.0001))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0), N=c(inputDF[i, "N"], inputDF[i, "N"], 0), X=c(4e-7, 4e-7, 0))
+    modifiedPars <- pars
+    modifiedPars$initS[1:2] <- c(0.5, 0.5)*inputDF[i, "initSH"]
+    
+    run <- coRal::run_coral(time=time, env=env, pars=modifiedPars)
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+    
+    
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+    
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "initSH"=inputDF[i, "initSH"], "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbs <- data.frame(twoSymbsOutput, row.names=NULL)
+```
+
+### All simulations equilibrated by the end
+
+```{r}
+all(as.logical(twoSymbs$changeH))
+all(as.logical(twoSymbs$changeS1))
+all(as.logical(twoSymbs$changeS2))
+```
+
+### Host growth rate
+
+```{r}
+par(mfrow=c(3, 1), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.0001)) {
+    data <- twoSymbs$gr[initSHsweep$initSH==initSH]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    mat <- mat[nrow(mat):1,]
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), 
+         breaks=seq(-0.1, 0.1, 0.02), col=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=seq(-0.1, 0.01, 0.02), fill=brewer.pal(length(seq(-0.1, 0.1, 0.02)),"BrBG"),
+      title="Host growth rate", cex=1.33, ncol=2)
+```
+
+### Sensitive:tolerant symbiont ratio
+
+```{r}
+par(mfrow=c(3, 1), pty="s", mai=c(0.4,0,0.2,0))
+
+for (initSH in c(1, 0.0001)) {
+    growth <- twoSymbs$gr[initSHsweep$initSH==initSH]
+    data <- twoSymbs$finalST[initSHsweep$initSH==initSH]
+    
+    growthmat <- matrix(as.numeric(growth), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    growthmat <- mat[nrow(growthmat):1,]
+    mat <- matrix(log10(as.numeric(data)), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+    mat <- mat[nrow(mat):1,]
+    
+    for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+            if (growthmat[[i, j]] < 0) {
+                mat[[i, j]] <- NA
+            }
+        }
+    }
+    
+    plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), na.col="gray",
+         breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=brewer.pal(length(c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000)),"RdBu"),
+         key=NULL) 
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000, "NA"), 
+       fill=c(brewer.pal(length(c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000)),"RdBu"), "gray")
+      title="log10 S:T ratio", cex=1.33, ncol=2)
+```
