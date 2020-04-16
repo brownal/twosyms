@@ -1,0 +1,517 @@
+---
+title: "Investigating a special case of shuffling in a constant environment"
+author: "Ross Cunning and Alexandra Brown"
+date: "4/15/2020"
+output: html_document
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=8, fig.height=8)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+
+options(repr.plot.res=240)
+```
+
+# Let's add some food!
+
+## A function for detecting when the host growth rate changes sign
+
+```{r}
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+}
+```
+
+## One-symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(1e-7, 9e-7, 2e-7), "X"=c(5e-8, 1e-7, 1.5e-7))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=1)
+pars$initS <- 1e-4
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+oneSymbOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+    run <- coRal::run_coral(time=time, env=env, pars=pars)
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- run$S[length(run$S)] / run$H[length(run$H)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+
+    gr_changes_list <- detect_gr_change(run)
+    last_gr_change <- NA
+    if (length(gr_changes_list) > 0) {
+        last_gr_change <- gr_changes_list[length(gr_changes_list)]
+    }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"],
+         "gr"=gr, "finalSH"=finalSH,
+         "changeH"=changeH, "changeS"=changeS, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+oneSymb <- data.frame(oneSymbOutput, row.names=NULL)
+```
+
+## Two symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(1e-7, 9e-7, 2e-7), "X"=c(5e-8, 1e-7, 1.5e-7))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=pars)
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbs <- data.frame(twoSymbsOutput, row.names=NULL)
+```
+
+# Where do hosts grow in the 1-symbiont case? Where do hosts grow in the 2 symbiont case?
+
+## One symbiont case
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- oneSymb$gr[(oneSymb$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- oneSymb$gr[(oneSymb$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+  colmax = max(as.numeric(oneSymb$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
+```
+
+## Two symbiont case
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- twoSymbs$gr[(twoSymbs$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+  colmax = max(as.numeric(twoSymbs$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
+```
+
+## Where do hosts grow in only the two symbiont case?
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data1 <- oneSymb$gr[(oneSymb$X==X)]
+  mat1 <- matrix(as.numeric(data1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  mat1 <- mat1[nrow(mat1):1,]
+
+  data2 <- twoSymbs$gr[(twoSymbs$X==X)]
+  mat2 <- matrix(as.numeric(data2), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat2 <- mat2[nrow(mat2):1,]
+
+  for (i in 1:nrow(mat1)) {
+       for (j in 1:ncol(mat1)) {
+             if ((mat2[i, j] <= 0) | (mat1[i, j] > 0)) {
+                  mat2[i, j] <- NA
+            }
+       }
+  }
+
+  colmax = max(as.numeric(twoSymbs$gr))
+  colbreak = colmax/10
+  plot(mat2, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
+```
+
+## Who dominates in these cases?
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+  data <- log10(as.numeric(twoSymbs$finalST[(twoSymbs$X==X)]))
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+      breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+      key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(c("-1e3", -100, -10, -1, 0, 1, 10, 100), c(-100, -10, -1, 0, 1, 10, 100, "1e3"), sep=" to "), "gr <= 0"),
+ fill=c(viridis(8), "lightgray"),
+                 title="log10 S:T", cex=1, ncol=2)
+```
+
+## When does the host last change growth rate?
+
+### One symbiont
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- oneSymb$last_sign_change_gr[(oneSymb$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- oneSymb$gr[(oneSymb$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+ colmax = 3000
+ colbreak = colmax/10
+ plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+      breaks=seq(0, colmax, colbreak), col=viridis(10),
+      key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+      fill=c(viridis(10), "lightgray"),
+                      title="Last time gr sign changed", cex=1, ncol=2)
+```
+
+### Two symbiont
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- twoSymbs$last_sign_change_gr[(twoSymbs$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+ colmax = 3000
+ colbreak = colmax/10
+ plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+      breaks=seq(0, colmax, colbreak), col=viridis(10),
+      key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+      fill=c(viridis(10), "lightgray"),
+                      title="Last time gr sign changed", cex=1, ncol=2)
+```
+
+### Two symbiont, where one-symbiont has gr <= 0
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- twoSymbs$last_sign_change_gr[(twoSymbs$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+
+  colmax = 3000
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Last time gr sign changed", cex=1, ncol=2)
+```
+
+### Two symbiont, where sensitive dominates
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- twoSymbs$last_sign_change_gr[(twoSymbs$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  st <- log10(as.numeric(twoSymbs$finalST[(twoSymbs$X==X)]))
+  stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  stmat <- stmat[nrow(stmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat[i, j] <= 0) | (stmat[i, j] <= 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+
+  colmax = 3000
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Last time gr sign changed", cex=1, ncol=2)
+```
+
+### Two symbiont, where tolerant dominates
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- twoSymbs$last_sign_change_gr[(twoSymbs$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  st <- log10(as.numeric(twoSymbs$finalST[(twoSymbs$X==X)]))
+  stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  stmat <- stmat[nrow(stmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat[i, j] <= 0) | (stmat[i, j] >= 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+
+  colmax = 3000
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Last time gr sign changed", cex=1, ncol=2)
+```
+
+### Two symbiont, where sensitive dominates despite one-symbiont gr<=0
+
+```{r}
+par(mfrow=c(2, 2), pty="s", mai=c(1,1,0.25,0.25))
+
+
+for (X in c(5e-8, 1e-7, 1.5e-7)) {
+  data <- twoSymbs$last_sign_change_gr[(twoSymbs$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  mat <- mat[nrow(mat):1,]
+
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbs$gr[(twoSymbs$X==X)]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+  st <- log10(as.numeric(twoSymbs$finalST[(twoSymbs$X==X)]))
+  stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+  stmat <- stmat[nrow(stmat):1,]
+
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+
+  colmax = 3000
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.0f')
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Last time gr sign changed", cex=1, ncol=2)
+```

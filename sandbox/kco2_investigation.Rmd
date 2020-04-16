@@ -7,7 +7,7 @@ output: html_document
 
 ```{r}
 #Set kintr options
-#knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=8, fig.height=8)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=8, fig.height=8)
 
 library(coRal)
 library(foreach)
@@ -19,13 +19,15 @@ library("viridis")
 
 options(repr.plot.res=200, repr.plot.height=4)
 ```
-I want to investigate how kCO2 affects the results since Roger says they're sensitive to it
+
+Roger has found that kCO2 affects the results in a slightly different model.
+Investigate whether the same is true for this model.
 
 
 # Step 1: Figure out the range to vary kCO2 over
 
 
-In Cunning et al. 2017, Ross varies the parameter over 0.5 to 1.5x its "default" value
+In Cunning et al. 2017, Ross varies the parameter over 0.5 to 1.5x its default value
 
 
 # Step 2: Set up the code to vary kCO2
@@ -159,28 +161,28 @@ registerDoParallel(cl)
 start <- proc.time()
 
 twoSymbsOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
-    env <- coRal::init_env(time=time, 
-                           L=c(inputDF[i, "L"], inputDF[i, "L"], 0), 
-                           N=c(inputDF[i, "N"], inputDF[i, "N"], 0), 
+    env <- coRal::init_env(time=time,
+                           L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+                           N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
                            X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
-   
+
     run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
     gr <- run$dH.Hdt[length(run$dH.Hdt)]
     finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
     finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
-    
-    
+
+
     changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
     changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
     changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
-    
+
     gr_changes_list <- detect_gr_change(run)
     last_gr_change <- NA
     if (length(gr_changes_list) > 0) {
         last_gr_change <- gr_changes_list[length(gr_changes_list)]
     }
-    
-    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"], 
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
          "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
          "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
 }
@@ -192,8 +194,8 @@ twoSymbs <- data.frame(twoSymbsOutput, row.names=NULL)
 
 ### Host growth rate
 
-```{r}
-par(mfrow=c(4, 6), pty="s", mai=c(0,0,1,0))
+```{r, fig.width=12, fig.height=12}
+par(mfrow=c(4, 6), pty="s", mai=c(0.2,0.2,0.2,0.2))
 
 for (kCO2 in seq(5, 15, 1)) {
     for (X in c(0, 1e-7)) {
@@ -201,23 +203,101 @@ for (kCO2 in seq(5, 15, 1)) {
         mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
         mat <- mat[nrow(mat):1,]
 
+        gr <- twoSymbs$gr[(twoSymbs$kCO2==kCO2) & (twoSymbs$X==X)]
+        grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+        grmat <- grmat[nrow(grmat):1,]
+
+        for (i in 1:nrow(mat)) {
+             for (j in 1:ncol(mat)) {
+                   if (grmat[i, j] <= 0) {
+                        mat[i, j] <- NA
+                  }
+             }
+       }
+
         colmax = max(as.numeric(twoSymbs$gr))
         colbreak = colmax/10
-        plot(mat, xlab="N", ylab="L", main=paste("Initial S:H =", initSH), na.col="lightgray", na.print=FALSE,
+        plot(mat, xlab="N", ylab="L", main=paste0("kCO2 = ", kCO2, ", X = ", X), na.col="lightgray", na.print=FALSE,
              breaks=seq(0, colmax, colbreak), col=viridis(10),
              key=NULL, fmt.cell='%.2f')
     }
 }
 plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
-legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"), 
-       fill=c(viridis(10), "lightgray"), 
-                       title="Host growth rate", cex=1.33, ncol=2)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
 ```
 
-```{r}
-twoSymbs$kCO2
+### Latest growth rate switching time
+
+```{r, fig.width=12, fig.height=12}
+
+par(mfrow=c(4, 6), pty="s", mai=c(0.2,0.2,.2,0.2))
+
+for (kCO2 in seq(5, 15, 1)) {
+    for (X in c(0, 1e-7)) {
+        data <- twoSymbs$last_sign_change_gr[(twoSymbs$kCO2==kCO2) & (twoSymbs$X==X)]
+        mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+        mat <- mat[nrow(mat):1,]
+
+        gr <- twoSymbs$gr[(twoSymbs$kCO2==kCO2) & (twoSymbs$X==X)]
+        grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+        grmat <- grmat[nrow(grmat):1,]
+
+        for (i in 1:nrow(mat)) {
+             for (j in 1:ncol(mat)) {
+                   if (grmat[i, j] <= 0) {
+                        mat[i, j] <- NA
+                  }
+             }
+       }
+
+        colmax = max(as.numeric(twoSymbs$last_sign_change_gr))
+        colbreak = colmax/10
+        plot(mat, xlab="N", ylab="L", main=paste0("kCO2 = ", kCO2, ", X = ", X), na.col="lightgray", na.print=FALSE,
+             breaks=seq(0, colmax, colbreak), col=viridis(10),
+             key=NULL, fmt.cell='%.0f')
+    }
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Last time growth rate switched", cex=1, ncol=2)
+
 ```
 
-```{r}
+### Sensitive:tolerant symbiont ratio
+
+```{r, fig.width=12, fig.height=12}
+
+par(mfrow=c(4, 6), pty="s", mai=c(0.2,0.2,0.2,0.2))
+
+for (kCO2 in seq(5, 15, 1)) {
+    for (X in c(0, 1e-7)) {
+        data <- log10(as.numeric(twoSymbs$finalST[(twoSymbs$kCO2==kCO2) & (twoSymbs$X==X)]))
+        mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+        mat <- mat[nrow(mat):1,]
+
+        gr <- twoSymbs$gr[(twoSymbs$kCO2==kCO2) & (twoSymbs$X==X)]
+        grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbs$L), unique(twoSymbs$N)))
+        grmat <- grmat[nrow(grmat):1,]
+
+        for (i in 1:nrow(mat)) {
+             for (j in 1:ncol(mat)) {
+                   if (grmat[i, j] <= 0) {
+                        mat[i, j] <- NA
+                  }
+             }
+       }
+
+        plot(mat, xlab="N", ylab="L", main=paste0("kCO2 = ", kCO2, ", X = ", X), na.col="lightgray", na.print=FALSE,
+             breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+             key=NULL, fmt.cell='%.0f')
+    }
+}
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(c("-1e3", -100, -10, -1, 0, 1, 10, 100), c(-100, -10, -1, 0, 1, 10, 100, "1e3"), sep=" to "), "gr <= 0"),
+       fill=c(viridis(8), "lightgray"),
+                       title="log10 S:T", cex=1, ncol=2)
 
 ```
