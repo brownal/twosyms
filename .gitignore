@@ -2,4 +2,8 @@
 .Rhistory
 .Rproj.user/
 .ipynb_checkpoints/
+*_files/
+*cache/
+*.html
+*.png
 
