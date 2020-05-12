@@ -1,0 +1,359 @@
+---
+title: "Investigating a special case of shuffling in a constant environment"
+author: "Ross Cunning and Alexandra Brown"
+date: "5/6/2020"
+output: html_document
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=8, fig.height=8)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+
+options(repr.plot.res=240)
+```
+```{r}
+# one-symbiont parameters
+pars1 <- def_pars(nsym=1)
+pars1$initS <- 1e-4
+
+# two-symbiont parameters
+pars2 <- def_pars(nsym=2)
+pars2$jCPm[2] <- 1.0
+pars2$kROS[2] <- 250
+pars2$jSGm[2] <- 0.15
+pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+# run simulations for 23000 days
+time<-seq(1, 3000, 0.1)
+
+# draw sets of parameter values randomly
+# hopefully this will speed things up compared to looking over a grid
+
+draws = 2400; # number of sets of random parameter combinations to look over
+
+search_params <- data.frame("L"=runif(draws, 0, 40),       # Light, choose values between 0 and 40
+                            "N"=runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
+                            "X"=runif(draws, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "kCO2" = runif(draws, 10, 50)) # kCO2 choose values between 10 and 50
+
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+    
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0), 
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+        
+    # simulate dynamics with just the sensitive symbiont
+    run_1symb <- coRal::run_coral(time=time, env=env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
+ 
+    # initialize rescue; will be TRUE if the tolearnt symbiont rescued the sensitive
+    rescue <- FALSE
+    
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+        
+        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
+        
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # only investigate the case where host growth is positive at the end of the simulation
+        
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+            
+            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
+            
+            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
+                
+                rescue <- TRUE
+            }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"], "rescue"=rescue)
+}
+
+stopCluster(cl) # stop the cluster
+
+# print time this look
+print("Simulation took")
+print(proc.time() - start)
+
+# store results in dataframe 
+#(named rescue_jCPm_1 for comparison with the case where the tolerant symbiont has jCPm = 2.8)
+rescue_jCPm_1 <- data.frame(results, row.names=NULL)
+    
+```
+
+```{r}
+sum(rescue_jCPm_1$rescue==TRUE)/nrow(rescue_jCPm_1)
+```
+
+```{r}
+par(mfrow=c(2, 3), pty="s")
+
+#plot(rescue_jCPm_1[,"N"], rescue_jCPm_1[,"L"], main="Light vs DIN", xlab="N", ylab="L")
+#points(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"N"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"L"], pch=19)
+plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"N"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"L"], pch=19,
+    main="Light vs DIN", xlab="N", ylab="L", xlim=c(0, 4e-6), ylim=c(0, 40))
+
+
+#plot(rescue_jCPm_1[,"X"], rescue_jCPm_1[,"L"], main="Light vs Food", xlab="X", ylab="L")
+#points(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"X"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"L"], pch=19)
+plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"X"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"L"], pch=19,
+     main="Light vs Food", xlab="X", ylab="L", xlim=c(0, 4e-07), ylim=c(0, 40))
+
+plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"L"], pch=19,
+     main="Light vs kCO2", xlab="kCO2", ylab="L", xlim=c(10, 50), ylim=c(0, 40))
+
+plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"X"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"N"], pch=19,
+     main="DIN vs Food", xlab="Food", ylab="DIN", xlim=c(0, 4e-7), ylim=c(0, 4e-6))
+
+plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"N"], pch=19,
+     main="DIN vs kCO2", xlab="kCO2", ylab="DIN", xlim=c(10, 50), ylim=c(0, 4e-6))
+
+plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"X"], pch=19,
+     main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
+```
+
+```{r}
+par(mfrow=c(2, 2))
+
+Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
+
+for (i in 1:length(Light_data$bins)-1) {
+    Light_data$vals[i] <- sum(with(rescue_jCPm_1, L >= Light_data$bins[i] & L < Light_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_1, L >= Light_data$bins[i] & L < Light_data$bins[i+1]))
+}
+
+with(Light_data[-nrow(Light_data),], {
+    plot(bins, vals, main="Light", xlab="L", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+
+
+DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
+
+for (i in 1:length(DIN_data$bins)-1) {
+    DIN_data$vals[i] <- sum(with(rescue_jCPm_1, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_1, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1]))
+}
+
+with(DIN_data[-nrow(DIN_data),], {
+    plot(bins, vals, main="DIN", xlab="N", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+
+
+
+Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
+
+for (i in 1:length(Food_data$bins)-1) {
+    Food_data$vals[i] <- sum(with(rescue_jCPm_1, X >= Food_data$bins[i] & X < Food_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_1, X >= Food_data$bins[i] & X < Food_data$bins[i+1]))
+}
+
+with(Food_data[-nrow(Food_data),], {
+    plot(bins, vals, main="Food", xlab="X", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+
+
+
+
+kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
+
+
+for (i in 1:length(kCO2_data$bins)-1) {
+    kCO2_data$vals[i] <- sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
+}
+
+with(kCO2_data[-nrow(kCO2_data),], {
+    plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+```
+
+# jCPm = 2.8
+
+```{r}
+# one-symbiont parameters
+pars1 <- def_pars(nsym=1)
+pars1$initS <- 1e-4
+
+# two-symbiont parameters
+pars2 <- def_pars(nsym=2)
+pars2$kROS[2] <- 250
+pars2$jSGm[2] <- 0.15
+pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+# run simulations for 23000 days
+time<-seq(1, 3000, 0.1)
+
+# draw sets of parameter values randomly
+# hopefully this will speed things up compared to looking over a grid
+
+draws = 2400; # number of sets of random parameter combinations to look over
+
+search_params <- data.frame("L"=runif(draws, 0, 40),       # Light, choose values between 0 and 40
+                            "N"=runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
+                            "X"=runif(draws, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "kCO2" = runif(draws, 10, 50)) # kCO2 choose values between 10 and 50
+
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results_2.8 <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+    
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0), 
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+        
+    # simulate dynamics with just the sensitive symbiont
+    run_1symb <- coRal::run_coral(time=time, env=env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
+ 
+    # initialize rescue; will be TRUE if the tolearnt symbiont rescued the sensitive
+    rescue <- FALSE
+    
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+        
+        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
+        
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # only investigate the case where host growth is positive at the end of the simulation
+        
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+            
+            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
+            
+            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
+                
+                rescue <- TRUE
+            }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"], "rescue"=rescue)
+}
+
+stopCluster(cl) # stop the cluster
+
+# print time this look
+print("Simulation took")
+print(proc.time() - start)
+
+# store results in dataframe 
+rescue_jCPm_2.8 <- data.frame(results_2.8, row.names=NULL)
+    
+```
+
+```{r}
+sum(rescue_jCPm_2.8$rescue==TRUE)/nrow(rescue_jCPm_2.8)
+```
+
+```{r}
+par(mfrow=c(2, 3), pty="s")
+
+plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"N"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"L"], pch=19,
+    main="Light vs DIN", xlab="N", ylab="L", xlim=c(0, 4e-6), ylim=c(0, 40))
+
+plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"X"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"L"], pch=19,
+     main="Light vs Food", xlab="X", ylab="L", xlim=c(0, 4e-07), ylim=c(0, 40))
+
+plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"kCO2"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"L"], pch=19,
+     main="Light vs kCO2", xlab="kCO2", ylab="L", xlim=c(10, 50), ylim=c(0, 40))
+
+plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"X"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"N"], pch=19,
+     main="DIN vs Food", xlab="Food", ylab="DIN", xlim=c(0, 4e-7), ylim=c(0, 4e-6))
+
+plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"kCO2"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"N"], pch=19,
+     main="DIN vs kCO2", xlab="kCO2", ylab="DIN", xlim=c(10, 50), ylim=c(0, 4e-6))
+
+plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"kCO2"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"X"], pch=19,
+     main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
+```
+
+```{r}
+par(mfrow=c(2, 2))
+
+Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
+
+for (i in 1:length(Light_data$bins)-1) {
+    Light_data$vals[i] <- sum(with(rescue_jCPm_2.8, L >= Light_data$bins[i] & L < Light_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_2.8, L >= Light_data$bins[i] & L < Light_data$bins[i+1]))
+}
+
+with(Light_data[-nrow(Light_data),], {
+    plot(bins, vals, main="Light", xlab="L", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+
+
+DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
+
+for (i in 1:length(DIN_data$bins)-1) {
+    DIN_data$vals[i] <- sum(with(rescue_jCPm_2.8, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_2.8, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1]))
+}
+
+with(DIN_data[-nrow(DIN_data),], {
+    plot(bins, vals, main="DIN", xlab="N", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+
+
+
+Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
+
+for (i in 1:length(Food_data$bins)-1) {
+    Food_data$vals[i] <- sum(with(rescue_jCPm_2.8, X >= Food_data$bins[i] & X < Food_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_2.8, X >= Food_data$bins[i] & X < Food_data$bins[i+1]))
+}
+
+with(Food_data[-nrow(Food_data),], {
+    plot(bins, vals, main="Food", xlab="X", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+
+
+
+
+kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
+
+
+for (i in 1:length(kCO2_data$bins)-1) {
+    kCO2_data$vals[i] <- sum(with(rescue_jCPm_2.8, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_2.8, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
+}
+
+with(kCO2_data[-nrow(kCO2_data),], {
+    plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue") 
+    lines(bins, vals)})
+```
