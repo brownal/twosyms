@@ -1,0 +1,250 @@
+---
+title: "Investigating how tolerant symbiont parameters affect rescue"
+author: "Ross Cunning and Alexandra Brown"
+date: "5/6/2020"
+output: html_document
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+
+options(repr.plot.res=240)
+```
+## A function for detecting when the host growth rate changes sign
+
+```{r, cache = TRUE}
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    changelist <- ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+    if (length(changelist) > 0) {
+          return(changelist[length(changelist)])
+   }
+   return(NA)
+}
+```
+
+```{r, cache = TRUE}
+# one-symbiont parameters
+pars1 <- def_pars(nsym=1)
+pars1$initS <- 1e-4
+pars1$kCO2 -> 37.5
+
+# run simulations for 23000 days
+time<-seq(1, 3000, 0.1)
+
+# draw sets of parameter values randomly
+# hopefully this will speed things up compared to looking over a grid
+
+draws = 10; #20000; # number of sets of random parameter combinations to look over
+
+search_params <- data.frame("L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
+                            "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
+                            # Tolerant symbiont parameters
+                            "kNPQ" = runif(draws, 112, 124), # Non-photochemical quenching, choose values between 112 and 124
+                            "astar" = runif(draws, 0.67, 1.34), # astar, choose values between 0.7 and 1.34     
+                            "jSGm" = runif(draws, 0.15, 0.25), # Maximum growth rate, choose values between 0.15 and 0.25
+                            "jCPm" = runif(draws, 1, 2.8), # Maximum photosynthetic rate, choose values between 1 and 2.8
+                            "kROS" = runif(draws, 80, 250), # kROS, choose values between 80 and 250
+                            "b" = runif(draws, 1, 5))   # b, choose values between 1 and 5
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(1.25e-7, 1.25e-7, 0))
+
+    # simulate dynamics with just the sensitive symbiont
+    run_1symb <- coRal::run_coral(time=time, env=env, pars=pars1)
+
+    # initialize rescue; will be TRUE if the tolerant symbiont rescued the sensitive
+    rescue <- FALSE
+
+    # initialize reason; will give the reason for lack of rescue if rescue does not occur
+    # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+    # reason = "T_dies" -> tolerant symbiont unable to rescue host
+    # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+    # reason = "rescue" -> rescue occurred
+    reason <- "S_lives"
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    rescue_time <- NA
+
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+         # two-symbiont parameters
+         pars2 <- def_pars(nsym=2)
+         pars2$kCO2 <- 37.5
+         pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+         pars2$astar[2] <- search_params[i, "astar"]
+         pars2$kNPQ[2] <- search_params[i, "kNPQ"]
+         pars2$jSGm[2] <- search_params[i, "jSGm"]
+         pars2$jCPm[2] <- search_params[i, "jCPm"]
+         pars2$kROS[2] <- search_params[i, "kROS"]
+         pars2$b[2] <- search_params[i, "b"]
+
+
+
+        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
+        reason <- "T_dies"
+
+        # if the tolerant symbiont rescues the sensitive symbiont, we want to record how long that takes to happen
+        # if that doesn't happen, we'll record the time to rescue as NA
+
+
+        # only further investigate the case where host growth is positive at the end of the simulation
+
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
+            # set reason to "T_dominates" for now because this is what must have happened if rescue did not occur
+            reason <- "T_dominates"
+
+            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
+
+                rescue <- TRUE
+                reason <- "rescue"
+
+                rescue_time <- detect_gr_change(run_2symb)
+            }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "astar"=search_params[i, "astar"], "kNPQ"=search_params[i, "kNPQ"],
+    "jSGm"=search_params[i, "jSGm"], "jCPm"=search_params[i, "jCPm"],
+    "kROS"=search_params[i, "kROS"], "b"=search_params[i, "b"],
+    "rescue"=rescue, "reason"=reason, "rescue_time"=rescue_time)
+}
+
+stopCluster(cl) # stop the cluster
+
+# print time this took
+print("Simulation took")
+print(proc.time() - start)
+
+# store results in dataframe
+rescue_tol_param <- data.frame(results, row.names=NULL)
+
+```
+
+```{r}
+par(mfrow=c(2, 3), pty="s")
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+     main="Light vs astar", xlab="astar", ylab="L", xlim=c(0.67, 1.34), ylim=c(0, 40))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+     main="Light vs kNPQ", xlab="kNPQ", ylab="L", xlim=c(112, 224), ylim=c(0, 40))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Light vs jSGm", xlab="jSGm", ylab="L", xlim=c(0.15, 0.25), ylim=c(0, 40))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Light vs jCPm", xlab="jCPm", ylab="L", xlim=c(1, 2.8), ylim=c(0, 40))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Light vs kROS", xlab="kROS", ylab="L", xlim=c(80, 250), ylim=c(0, 40))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Light vs b", xlab="b", ylab="L", xlim=c(1, 5), ylim=c(0, 40))
+
+```
+
+```{r}
+par(mfrow=c(2, 3), pty="s")
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+     main="Nitrogen vs astar", xlab="astar", ylab="DIN", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+     main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="DIN", xlim=c(112, 224), ylim=c(0, 4e-6))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Nitrogen vs jSGm", xlab="jSGm", ylab="DIN", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Nitrogen vs jCPm", xlab="jCPm", ylab="DIN", xlim=c(1, 2.8), ylim=c(0, 4e-6))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Nitrogen vs kROS", xlab="kROS", ylab="DIN", xlim=c(80, 250), ylim=c(0, 4e-6))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="Nitrogen vs b", xlab="b", ylab="DIN", xlim=c(1, 5), ylim=c(0, 4e-6))
+
+```
+
+```{r}
+par(mfrow=c(4, 4), pty="s")
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+     main="kNPQ vs astar", xlab="astar", ylab="kNPQ", xlim=c(0.67, 1.34), ylim=c(112, 224))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="jSGm vs astar", xlab="astar", ylab="jSGm", xlim=c(0.67, 1.34), ylim=c(0.15, 0.25))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="jCPm vs astar", xlab="astar", ylab="jCPm", xlim=c(0.67, 1.34), ylim=c(1, 2.8))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="kROS vs astar", xlab="astar", ylab="kROS", xlim=c(0.67, 1.34), ylim=c(80, 250))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="kROS vs b", xlab="astar", ylab="b", xlim=c(0.67, 1.34), ylim=c(1, 5))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+     main="jSGm vs kNPQ", xlab="kNPQ", ylab="jSGm", xlim=c(112, 224), ylim=c(0.15, 0.25))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="jCPm vs kNPQ", xlab="kNPQ", ylab="jCPm", xlim=c(112, 224), ylim=c(1, 2.8))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="kROS vs kNPQ", xlab="kNPQ", ylab="kROS", xlim=c(112, 224), ylim=c(80, 250))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="b vs kNPQ", xlab="kNPQ", ylab="b", xlim=c(112, 224), ylim=c(1, 5))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="jCPm vs jSGm", xlab="jSGm", ylab="jCPm", xlim=c(0.15, 0.25), ylim=c(1, 2.8))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="kROS vs jSGm", xlab="jSGm", ylab="kROS", xlim=c(0.15, 0.25), ylim=c(80, 250))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="b vs jSGm", xlab="jSGm", ylab="b", xlim=c(0.15, 0.25), ylim=c(1, 5))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="kROS vs jCPm", xlab="jCPm", ylab="kROS", xlim=c(1, 2.8), ylim=c(80, 250))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="b vs jCPm", xlab="jCPm", ylab="b", xlim=c(1, 2.8), ylim=c(1, 5))
+
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+      main="b vs kROS", xlab="kROS", ylab="b", xlim=c(80, 250), ylim=c(1, 5))
+
+```
