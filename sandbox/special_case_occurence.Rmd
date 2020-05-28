@@ -19,6 +19,20 @@ library("viridis")
 
 options(repr.plot.res=240)
 ```
+## A function for detecting when the host growth rate changes sign
+
+```{r, cache = TRUE}
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    changelist <- ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+    if (length(changelist) > 0) {
+          return(changelist[length(changelist)])
+   }
+   return(NA)
+}
+```
+
 ```{r, cache = TRUE}
 # one-symbiont parameters
 pars1 <- def_pars(nsym=1)
@@ -37,7 +51,7 @@ time<-seq(1, 3000, 0.1)
 # draw sets of parameter values randomly
 # hopefully this will speed things up compared to looking over a grid
 
-draws = 10000; #2400; # number of sets of random parameter combinations to look over
+draws = 20000; #2400; # number of sets of random parameter combinations to look over
 
 search_params <- data.frame("L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
                             "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
@@ -76,6 +90,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
     # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
     # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    rescue_time <- NA
 
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
 
@@ -85,6 +100,10 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
         # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
         # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
         reason <- "T_dies"
+
+        # if the tolerant symbiont rescues the sensitive symbiont, we want to record how long that takes to happen
+        # if that doesn't happen, we'll record the time to rescue as NA
+
 
         # only further investigate the case where host growth is positive at the end of the simulation
 
@@ -98,13 +117,15 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
                 rescue <- TRUE
                 reason <- "rescue"
+
+                rescue_time <- detect_gr_change(run_2symb)
             }
         }
     }
 
     # return the parameters and whether rescue was successful or not
     list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
-    "kCO2"=search_params[i, "kCO2"], "rescue"=rescue, "reason"=reason)
+    "kCO2"=search_params[i, "kCO2"], "rescue"=rescue, "reason"=reason, "rescue_time"=rescue_time)
 }
 
 stopCluster(cl) # stop the cluster
@@ -154,9 +175,9 @@ plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm
 
 plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"X"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
      main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
+```
 
-
-png("env_regular_params.png")
+```{r}
 par(mfrow=c(2, 3), pty="s")
 
 #plot(rescue_jCPm_1[,"N"], rescue_jCPm_1[,"L"], main="Light vs DIN", xlab="N", ylab="L")
@@ -181,11 +202,10 @@ plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm
 
 plot(rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"kCO2"], rescue_jCPm_1[rescue_jCPm_1$rescue==TRUE,"X"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
      main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
-dev.off()
+```
 
 
-
-png("env_regular_params_S_lives.png")
+```{r}
 par(mfrow=c(2, 3), pty="s")
 
 #plot(rescue_jCPm_1[,"N"], rescue_jCPm_1[,"L"], main="Light vs DIN", xlab="N", ylab="L")
@@ -209,11 +229,9 @@ plot(rescue_jCPm_1[rescue_jCPm_1$reason=="S_lives","kCO2"], rescue_jCPm_1[rescue
 
 plot(rescue_jCPm_1[rescue_jCPm_1$reason=="S_lives","kCO2"], rescue_jCPm_1[rescue_jCPm_1$reason=="S_lives","X"], pch=19, col=rgb(1, 0, 0, alpha=0.01),
      main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
+```
 
-dev.off()
-
-
-png("env_regular_params_T_dies.png")
+```{r}
 par(mfrow=c(2, 3), pty="s")
 
 #plot(rescue_jCPm_1[,"N"], rescue_jCPm_1[,"L"], main="Light vs DIN", xlab="N", ylab="L")
@@ -237,10 +255,9 @@ plot(rescue_jCPm_1[rescue_jCPm_1$reason=="T_dies","kCO2"], rescue_jCPm_1[rescue_
 
 plot(rescue_jCPm_1[rescue_jCPm_1$reason=="T_dies","kCO2"], rescue_jCPm_1[rescue_jCPm_1$reason=="T_dies","X"], pch=19, col=rgb(0, 1, 0, alpha=0.1),
      main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
+```
 
-dev.off()
-
-png("env_regular_params_T_dominates.png")
+```{r}
 par(mfrow=c(2, 3), pty="s")
 
 #plot(rescue_jCPm_1[,"N"], rescue_jCPm_1[,"L"], main="Light vs DIN", xlab="N", ylab="L")
@@ -265,10 +282,8 @@ plot(rescue_jCPm_1[rescue_jCPm_1$reason=="T_dominates","kCO2"], rescue_jCPm_1[re
 plot(rescue_jCPm_1[rescue_jCPm_1$reason=="T_dominates","kCO2"], rescue_jCPm_1[rescue_jCPm_1$reason=="T_dominates","X"], pch=19, col=rgb(0, 0, 0, alpha=1),
      main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
 
-dev.off()
+```
 
-```
-```
 
 ```{r}
 par(mfrow=c(2, 2))
@@ -310,627 +325,82 @@ with(Food_data[-nrow(Food_data),], {
     lines(bins, vals)})
 
 
-
-png("single_param_rescue_normal.png")
 kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
 
-
 for (i in 1:length(kCO2_data$bins)-1) {
-    kCO2_data$vals[i] <- sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
+    kCO2_data$vals[i] <- sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & X < kCO2_data$bins[i+1] & rescue==TRUE))/
+    sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & X < kCO2_data$bins[i+1]))
 }
 
 with(kCO2_data[-nrow(kCO2_data),], {
     plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue")
     lines(bins, vals)})
 
+```
 
-    par(mfrow=c(2, 2))
+```{r}
+par(mfrow=c(2, 2))
 
-    Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
+Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
 
-    for (i in 1:length(Light_data$bins)-1) {
-        Light_data$vals[i] <- sum(with(rescue_jCPm_1, L >= Light_data$bins[i] & L < Light_data$bins[i+1] & rescue==TRUE))/
-        sum(with(rescue_jCPm_1, L >= Light_data$bins[i] & L < Light_data$bins[i+1]))
-    }
+for (i in 1:length(Light_data$bins)-1) {
+      if (length(rescue_jCPm_1[rescue_jCPm_1$L >= Light_data$bins[i] & rescue_jCPm_1$L < Light_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE,]) > 0){
+            Light_data$vals[i] <- mean(as.numeric(
+                  rescue_jCPm_1[rescue_jCPm_1$L >= Light_data$bins[i] & rescue_jCPm_1$L < Light_data$bins[i+1] & rescue_jCPm_1$rescue == TRUE, "rescue_time"]), na.rm=TRUE)
+      }
+}
 
-    with(Light_data[-nrow(Light_data),], {
-        plot(bins, vals, main="Light", xlab="L", ylab="fraction of tested values w/ rescue")
-        lines(bins, vals)})
-
-
-    DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
-
-    for (i in 1:length(DIN_data$bins)-1) {
-        DIN_data$vals[i] <- sum(with(rescue_jCPm_1, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1] & rescue==TRUE))/
-        sum(with(rescue_jCPm_1, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1]))
-    }
-
-    with(DIN_data[-nrow(DIN_data),], {
-        plot(bins, vals, main="DIN", xlab="N", ylab="fraction of tested values w/ rescue")
-        lines(bins, vals)})
+with(Light_data[-nrow(Light_data),], {
+    plot(bins, vals, main="Light", xlab="L", ylab="Mean time to rescue (days)")
+    lines(bins, vals)})
 
 
 
-    Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
+DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
 
-    for (i in 1:length(Food_data$bins)-1) {
-        Food_data$vals[i] <- sum(with(rescue_jCPm_1, X >= Food_data$bins[i] & X < Food_data$bins[i+1] & rescue==TRUE))/
-        sum(with(rescue_jCPm_1, X >= Food_data$bins[i] & X < Food_data$bins[i+1]))
-    }
+for (i in 1:length(DIN_data$bins)-1) {
+      if (length(rescue_jCPm_1[rescue_jCPm_1$N >= DIN_data$bins[i] & rescue_jCPm_1$N < DIN_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE,]) > 0){
+            DIN_data$vals[i] <- mean(as.numeric(
+                  rescue_jCPm_1[rescue_jCPm_1$N >= DIN_data$bins[i] & rescue_jCPm_1$N < DIN_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
+      }
+}
 
-    with(Food_data[-nrow(Food_data),], {
-        plot(bins, vals, main="Food", xlab="X", ylab="fraction of tested values w/ rescue")
-        lines(bins, vals)})
+with(DIN_data[-nrow(DIN_data),], {
+    plot(bins, vals, main="DIN", xlab="N", ylab="Mean time to rescue (days)")
+    lines(bins, vals)})
 
 
+Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
 
+for (i in 1:length(Food_data$bins)-1) {
+      if (length(rescue_jCPm_1[rescue_jCPm_1$X >= Food_data$bins[i] & rescue_jCPm_1$X < Food_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE,]) > 0){
+            Food_data$vals[i] <- mean(as.numeric(
+                  rescue_jCPm_1[rescue_jCPm_1$X >= Food_data$bins[i] & rescue_jCPm_1$X < Food_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
+      }
+}
 
-    kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
+with(Food_data[-nrow(Food_data),], {
+    plot(bins, vals, main="Food", xlab="X", ylab="Mean time to rescue (days)")
+    lines(bins, vals)})
 
+kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
 
     for (i in 1:length(kCO2_data$bins)-1) {
-        kCO2_data$vals[i] <- sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
-        sum(with(rescue_jCPm_1, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
+          if (length(rescue_jCPm_1[rescue_jCPm_1$kCO2 >= kCO2_data$bins[i] & rescue_jCPm_1$kCO2 < kCO2_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE,]) > 0){
+                kCO2_data$vals[i] <- mean(as.numeric(
+                      rescue_jCPm_1[rescue_jCPm_1$kCO2 >= kCO2_data$bins[i] & rescue_jCPm_1$kCO2 < kCO2_data$bins[i+1] & rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
+          }
     }
 
     with(kCO2_data[-nrow(kCO2_data),], {
-        plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue")
+        plot(bins, vals, main="kCO2", xlab="kCO2", ylab="Mean time to rescue (days)")
         lines(bins, vals)})
-dev.off()
-```
 
-
-# jCPm = 2.8
-
-
-```{r, cache=TRUE}
-# one-symbiont parameters
-pars1 <- def_pars(nsym=1)
-pars1$initS <- 1e-4
-
-# two-symbiont parameters
-pars2 <- def_pars(nsym=2)
-pars2$kROS[2] <- 250
-pars2$jSGm[2] <- 0.15
-pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
-
-# run simulations for 23000 days
-time<-seq(1, 3000, 0.1)
-
-# draw sets of parameter values randomly
-# hopefully this will speed things up compared to looking over a grid
-
-draws = 10000; # number of sets of random parameter combinations to look over
-
-search_params <- data.frame("L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
-                            "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
-                            "X" = runif(draws, 0, 4e-7),     # Food, choose values between 0 and 4e07
-                            "kCO2" = runif(draws, 10, 50))   # kCO2 choose values between 10 and 50
-
-
-# set up for parallel run
-cl <- makeCluster(detectCores() - 1)
-registerDoParallel(cl)
-
-# start the timer
-start <- proc.time()
-
-
-# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
-# the sensitive symbiont at each parameter value
-
-results_2.8 <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
-
-    # Set up the environmental conditions
-    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
-                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
-
-    # simulate dynamics with just the sensitive symbiont
-    run_1symb <- coRal::run_coral(time=time, env=env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
-
-    # initialize rescue; will be TRUE if the tolerant symbiont rescued the sensitive
-    rescue <- FALSE
-
-    # initialize reason; will give the reason for lack of rescue if rescue does not occur
-    # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
-    # reason = "T_dies" -> tolerant symbiont unable to rescue host
-    # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
-    # reason = "rescue" -> rescue occurred
-    reason <- "S_lives"
-
-    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
-    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
-
-    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
-
-
-        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
-
-        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
-        # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
-        reason <- "T_dies"
-
-        # only further investigate the case where host growth is positive at the end of the simulation
-
-        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
-
-            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
-            # set reason to "T_dominates" for now because this is what must have happened if rescue did not occur
-            reason <- "T_dominates"
-
-            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
-
-                rescue <- TRUE
-                reason <- "rescue"
-            }
-        }
-    }
-
-    # return the parameters and whether rescue was successful or not
-    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
-    "kCO2"=search_params[i, "kCO2"], "rescue"=rescue, "reason"=reason)
-}
-
-stopCluster(cl) # stop the cluster
-
-# print time this look
-print("Simulation took")
-print(proc.time() - start)
-
-# store results in dataframe
-rescue_jCPm_2.8 <- data.frame(results_2.8, row.names=NULL)
-
-```
-
-```{r}
-sum(rescue_jCPm_2.8$rescue==TRUE)/nrow(rescue_jCPm_2.8)
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"N"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"L"], pch=19,
-    main="Light vs DIN", xlab="N", ylab="L", xlim=c(0, 4e-6), ylim=c(0, 40))
-
-plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"X"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"L"], pch=19,
-     main="Light vs Food", xlab="X", ylab="L", xlim=c(0, 4e-07), ylim=c(0, 40))
-
-plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"kCO2"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"L"], pch=19,
-     main="Light vs kCO2", xlab="kCO2", ylab="L", xlim=c(10, 50), ylim=c(0, 40))
-
-plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"X"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"N"], pch=19,
-     main="DIN vs Food", xlab="Food", ylab="DIN", xlim=c(0, 4e-7), ylim=c(0, 4e-6))
-
-plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"kCO2"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"N"], pch=19,
-     main="DIN vs kCO2", xlab="kCO2", ylab="DIN", xlim=c(10, 50), ylim=c(0, 4e-6))
-
-plot(rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"kCO2"], rescue_jCPm_2.8[rescue_jCPm_2.8$rescue==TRUE,"X"], pch=19,
-     main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
-```
-
-```{r}
-par(mfrow=c(2, 2))
-
-Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
-
-for (i in 1:length(Light_data$bins)-1) {
-    Light_data$vals[i] <- sum(with(rescue_jCPm_2.8, L >= Light_data$bins[i] & L < Light_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_jCPm_2.8, L >= Light_data$bins[i] & L < Light_data$bins[i+1]))
-}
-
-with(Light_data[-nrow(Light_data),], {
-    plot(bins, vals, main="Light", xlab="L", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
-
-for (i in 1:length(DIN_data$bins)-1) {
-    DIN_data$vals[i] <- sum(with(rescue_jCPm_2.8, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_jCPm_2.8, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1]))
-}
-
-with(DIN_data[-nrow(DIN_data),], {
-    plot(bins, vals, main="DIN", xlab="N", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-
-Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
-
-for (i in 1:length(Food_data$bins)-1) {
-    Food_data$vals[i] <- sum(with(rescue_jCPm_2.8, X >= Food_data$bins[i] & X < Food_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_jCPm_2.8, X >= Food_data$bins[i] & X < Food_data$bins[i+1]))
-}
-
-with(Food_data[-nrow(Food_data),], {
-    plot(bins, vals, main="Food", xlab="X", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-
-
-kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
-
-
-for (i in 1:length(kCO2_data$bins)-1) {
-    kCO2_data$vals[i] <- sum(with(rescue_jCPm_2.8, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_jCPm_2.8, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
-}
-
-with(kCO2_data[-nrow(kCO2_data),], {
-    plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-```
-
-
-# kNPQ = 123.1
-
-```{r, cache=TRUE}
-# one-symbiont parameters
-pars1 <- def_pars(nsym=1)
-pars1$initS <- 1e-4
-
-# two-symbiont parameters
-pars2 <- def_pars(nsym=2)
-pars2$jCPm[2] <- 1
-pars2$kROS[2] <- 250
-pars2$jSGm[2] <- 0.15
-pars2$kNPQ[2] <- 123.1
-pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
-
-# run simulations for 23000 days
-time<-seq(1, 3000, 0.1)
-
-# draw sets of parameter values randomly
-# hopefully this will speed things up compared to looking over a grid
-
-draws = 10000; # number of sets of random parameter combinations to look over
-
-search_params <- data.frame("L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
-                            "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
-                            "X" = runif(draws, 0, 4e-7),     # Food, choose values between 0 and 4e07
-                            "kCO2" = runif(draws, 10, 50))   # kCO2 choose values between 10 and 50
-
-
-# set up for parallel run
-cl <- makeCluster(detectCores() - 1)
-registerDoParallel(cl)
-
-# start the timer
-start <- proc.time()
-
-
-# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
-# the sensitive symbiont at each parameter value
-
-results_kNPQ <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
-
-    # Set up the environmental conditions
-    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
-                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
-
-    # simulate dynamics with just the sensitive symbiont
-    run_1symb <- coRal::run_coral(time=time, env=env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
-
-    # initialize rescue; will be TRUE if the tolerant symbiont rescued the sensitive
-    rescue <- FALSE
-
-    # initialize reason; will give the reason for lack of rescue if rescue does not occur
-    # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
-    # reason = "T_dies" -> tolerant symbiont unable to rescue host
-    # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
-    # reason = "rescue" -> rescue occurred
-    reason <- "S_lives"
-
-    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
-    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
-
-    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
-
-
-        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
-
-        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
-        # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
-        reason <- "T_dies"
-
-        # only further investigate the case where host growth is positive at the end of the simulation
-
-        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
-
-            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
-            # set reason to "T_dominates" for now because this is what must have happened if rescue did not occur
-            reason <- "T_dominates"
-
-            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
-
-                rescue <- TRUE
-                reason <- "rescue"
-            }
-        }
-    }
-
-    # return the parameters and whether rescue was successful or not
-    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
-    "kCO2"=search_params[i, "kCO2"], "rescue"=rescue, "reason"=reason)
-}
-
-stopCluster(cl) # stop the cluster
-
-# print time this look
-print("Simulation took")
-print(proc.time() - start)
-
-# store results in dataframe
-rescue_kNPQ <- data.frame(results_kNPQ, row.names=NULL)
-
-```
-
-```{r}
-sum(rescue_kNPQ$rescue==TRUE)/nrow(rescue_kNPQ)
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"N"], rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"L"], pch=19,
-    main="Light vs DIN", xlab="N", ylab="L", xlim=c(0, 4e-6), ylim=c(0, 40))
-
-plot(rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"X"], rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"L"], pch=19,
-     main="Light vs Food", xlab="X", ylab="L", xlim=c(0, 4e-07), ylim=c(0, 40))
-
-plot(rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"kCO2"], rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"L"], pch=19,
-     main="Light vs kCO2", xlab="kCO2", ylab="L", xlim=c(10, 50), ylim=c(0, 40))
-
-plot(rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"X"], rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"N"], pch=19,
-     main="DIN vs Food", xlab="Food", ylab="DIN", xlim=c(0, 4e-7), ylim=c(0, 4e-6))
-
-plot(rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"kCO2"], rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"N"], pch=19,
-     main="DIN vs kCO2", xlab="kCO2", ylab="DIN", xlim=c(10, 50), ylim=c(0, 4e-6))
-
-plot(rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"kCO2"], rescue_kNPQ[rescue_kNPQ$rescue==TRUE,"X"], pch=19,
-     main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
-```
-
-```{r}
-par(mfrow=c(2, 2))
-
-Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
-
-for (i in 1:length(Light_data$bins)-1) {
-    Light_data$vals[i] <- sum(with(rescue_kNPQ, L >= Light_data$bins[i] & L < Light_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_kNPQ, L >= Light_data$bins[i] & L < Light_data$bins[i+1]))
-}
-
-with(Light_data[-nrow(Light_data),], {
-    plot(bins, vals, main="Light", xlab="L", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
-
-for (i in 1:length(DIN_data$bins)-1) {
-    DIN_data$vals[i] <- sum(with(rescue_kNPQ, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_kNPQ, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1]))
-}
-
-with(DIN_data[-nrow(DIN_data),], {
-    plot(bins, vals, main="DIN", xlab="N", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-
-Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
-
-for (i in 1:length(Food_data$bins)-1) {
-    Food_data$vals[i] <- sum(with(rescue_kNPQ, X >= Food_data$bins[i] & X < Food_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_kNPQ, X >= Food_data$bins[i] & X < Food_data$bins[i+1]))
-}
-
-with(Food_data[-nrow(Food_data),], {
-    plot(bins, vals, main="Food", xlab="X", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-
-
-kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
-
-
-for (i in 1:length(kCO2_data$bins)-1) {
-    kCO2_data$vals[i] <- sum(with(rescue_kNPQ, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_kNPQ, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
-}
-
-with(kCO2_data[-nrow(kCO2_data),], {
-    plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-```
-
-# astar = 1.474
-
-```{r, cache=TRUE}
-# one-symbiont parameters
-pars1 <- def_pars(nsym=1)
-pars1$initS <- 1e-4
-
-# two-symbiont parameters
-pars2 <- def_pars(nsym=2)
-pars2$jCPm[2] <- 1
-pars2$kROS[2] <- 250
-pars2$jSGm[2] <- 0.15
-pars2$astar[2] <- 1.474
-pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
-
-# run simulations for 23000 days
-time<-seq(1, 3000, 0.1)
-
-# draw sets of parameter values randomly
-# hopefully this will speed things up compared to looking over a grid
-
-draws = 10000; # number of sets of random parameter combinations to look over
-
-search_params <- data.frame("L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
-                            "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
-                            "X" = runif(draws, 0, 4e-7),     # Food, choose values between 0 and 4e07
-                            "kCO2" = runif(draws, 10, 50))   # kCO2 choose values between 10 and 50
-
-
-# set up for parallel run
-cl <- makeCluster(detectCores() - 1)
-registerDoParallel(cl)
-
-# start the timer
-start <- proc.time()
-
-
-# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
-# the sensitive symbiont at each parameter value
-
-results_astar <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
-
-    # Set up the environmental conditions
-    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
-                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
-
-    # simulate dynamics with just the sensitive symbiont
-    run_1symb <- coRal::run_coral(time=time, env=env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
-
-    # initialize rescue; will be TRUE if the tolerant symbiont rescued the sensitive
-    rescue <- FALSE
-
-    # initialize reason; will give the reason for lack of rescue if rescue does not occur
-    # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
-    # reason = "T_dies" -> tolerant symbiont unable to rescue host
-    # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
-    # reason = "rescue" -> rescue occurred
-    reason <- "S_lives"
-
-    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
-    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
-
-    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
-
-
-        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
-
-        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
-        # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
-        reason <- "T_dies"
-
-        # only further investigate the case where host growth is positive at the end of the simulation
-
-        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
-
-            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
-            # set reason to "T_dominates" for now because this is what must have happened if rescue did not occur
-            reason <- "T_dominates"
-
-            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
-
-                rescue <- TRUE
-                reason <- "rescue"
-            }
-        }
-    }
-
-    # return the parameters and whether rescue was successful or not
-    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
-    "kCO2"=search_params[i, "kCO2"], "rescue"=rescue, "reason"=reason)
-}
-
-stopCluster(cl) # stop the cluster
-
-# print time this look
-print("Simulation took")
-print(proc.time() - start)
-
-# store results in dataframe
-rescue_astar <- data.frame(results_astar, row.names=NULL)
-
-```
-
-```{r}
-sum(rescue_astar$rescue==TRUE)/nrow(rescue_astar)
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_astar[rescue_astar$rescue==TRUE,"N"], rescue_astar[rescue_astar$rescue==TRUE,"L"], pch=19,
-    main="Light vs DIN", xlab="N", ylab="L", xlim=c(0, 4e-6), ylim=c(0, 40))
-
-plot(rescue_astar[rescue_astar$rescue==TRUE,"X"], rescue_astar[rescue_astar$rescue==TRUE,"L"], pch=19,
-     main="Light vs Food", xlab="X", ylab="L", xlim=c(0, 4e-07), ylim=c(0, 40))
-
-plot(rescue_astar[rescue_astar$rescue==TRUE,"kCO2"], rescue_astar[rescue_astar$rescue==TRUE,"L"], pch=19,
-     main="Light vs kCO2", xlab="kCO2", ylab="L", xlim=c(10, 50), ylim=c(0, 40))
-
-plot(rescue_astar[rescue_astar$rescue==TRUE,"X"], rescue_astar[rescue_astar$rescue==TRUE,"N"], pch=19,
-     main="DIN vs Food", xlab="Food", ylab="DIN", xlim=c(0, 4e-7), ylim=c(0, 4e-6))
-
-plot(rescue_astar[rescue_astar$rescue==TRUE,"kCO2"], rescue_astar[rescue_astar$rescue==TRUE,"N"], pch=19,
-     main="DIN vs kCO2", xlab="kCO2", ylab="DIN", xlim=c(10, 50), ylim=c(0, 4e-6))
-
-plot(rescue_astar[rescue_astar$rescue==TRUE,"kCO2"], rescue_astar[rescue_astar$rescue==TRUE,"X"], pch=19,
-     main="Food vs kCO2", xlab="kCO2", ylab="Food", xlim=c(10, 50), ylim=c(0, 4e-7))
-```
-
-```{r}
-par(mfrow=c(2, 2))
-
-Light_data = data.frame(bins=seq(0, 40, 5), vals=NA)
-
-for (i in 1:length(Light_data$bins)-1) {
-    Light_data$vals[i] <- sum(with(rescue_astar, L >= Light_data$bins[i] & L < Light_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_astar, L >= Light_data$bins[i] & L < Light_data$bins[i+1]))
-}
-
-with(Light_data[-nrow(Light_data),], {
-    plot(bins, vals, main="Light", xlab="L", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-DIN_data = data.frame(bins=seq(0, 4e-6, 5e-7), vals=NA)
-
-for (i in 1:length(DIN_data$bins)-1) {
-    DIN_data$vals[i] <- sum(with(rescue_astar, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_astar, N >= DIN_data$bins[i] & N < DIN_data$bins[i+1]))
-}
-
-with(DIN_data[-nrow(DIN_data),], {
-    plot(bins, vals, main="DIN", xlab="N", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-
-Food_data = data.frame(bins=seq(0, 4e-7, 5e-8), vals=NA)
-
-for (i in 1:length(Food_data$bins)-1) {
-    Food_data$vals[i] <- sum(with(rescue_astar, X >= Food_data$bins[i] & X < Food_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_astar, X >= Food_data$bins[i] & X < Food_data$bins[i+1]))
-}
-
-with(Food_data[-nrow(Food_data),], {
-    plot(bins, vals, main="Food", xlab="X", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
-
-
-
-
-kCO2_data = data.frame(bins=seq(10, 50, 5), vals=NA)
-
-
-for (i in 1:length(kCO2_data$bins)-1) {
-    kCO2_data$vals[i] <- sum(with(rescue_astar, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1] & rescue==TRUE))/
-    sum(with(rescue_astar, kCO2 >= kCO2_data$bins[i] & kCO2 < kCO2_data$bins[i+1]))
-}
-
-with(kCO2_data[-nrow(kCO2_data),], {
-    plot(bins, vals, main="kCO2", xlab="kCO2", ylab="fraction of tested values w/ rescue")
-    lines(bins, vals)})
+par(mfrow=c(2, 1))
+hist(as.numeric(rescue_jCPm_1$rescue_time), main="Distribution of rescue times", xlab="time to rescue", breaks=c(0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400, 2700, 3000))
+hist(as.numeric(rescue_jCPm_1$rescue_time)[as.numeric(rescue_jCPm_1$rescue_time) <=365],
+      breaks=seq(0, 12)*365/12, main="Distribution of rescue times < 1 year", xlab="time to rescue",
+      labels=c("<1mo", "1-2mo", "2-3mo", "3-4mo", "4-5mo", "5-6mo", "6-7mo", "7-8mo", "8-9mo", "9-10mo", "10-11mo", "11-12mo"))    
 ```
 
 
@@ -954,65 +424,85 @@ for (i in 1:nrow(rescue_grid)) {
 print(rescue_grid[rescue_grid$rescue_fraction == max(rescue_grid$rescue_fraction),])
 ```
 
-## jCPm = 2.8
-
+#Identifying combination of food and kCO2 values that produces the lowest mean "rescue"
 ```{r}
-# We're going to check a grid of all the parameter combinations here
-rescue_grid <- cbind(expand.grid("Xmin"=seq(0, 3.5e-7, 5e-8), "kCO2min"=seq(10, 45, 5)),
-      expand.grid("Xmax"=seq(5e-8, 4e-7, 5e-8), "kCO2max"=seq(15, 50, 5)))
-
-rescue_grid$rescue_fraction <- rep(NA, nrow(rescue_grid))
-
+min_mean <- Inf
+argmin_mean <- 0
 for (i in 1:nrow(rescue_grid)) {
-      rescue_grid[i, "rescue_fraction"] <- sum(with(rescue_jCPm_2.8,
-            X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
-            kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"] &
-            rescue==TRUE)) / sum(with(rescue_jCPm_2.8,
-                  X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
-                  kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"]))
-}
+      if(rescue_grid[i, "rescue_fraction"] > 0) {
+            section_mean <- mean(as.numeric(rescue_jCPm_1[rescue_jCPm_1$X >= rescue_grid[i, "Xmin"] & rescue_jCPm_1$X < rescue_grid[i, "Xmax"] &
+            rescue_jCPm_1$kCO2 >= rescue_grid[i, "kCO2min"] & rescue_jCPm_1$kCO2 < rescue_grid[i, "kCO2max"] &
+            rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
 
-print(rescue_grid[rescue_grid$rescue_fraction == max(rescue_grid$rescue_fraction),])
+            if(section_mean < min_mean) {
+                  min_mean <- section_mean
+                  argmin_mean <- i
+            }
+      }
+}
+print(min_mean)
+print(rescue_grid[argmin_mean,])
+
 ```
 
-## kNPQ
-
+#Identifying combination of food and kCO2 values that produces the lowest "rescue" time
 ```{r}
-# We're going to check a grid of all the parameter combinations here
-rescue_grid <- cbind(expand.grid("Xmin"=seq(0, 3.5e-7, 5e-8), "kCO2min"=seq(10, 45, 5)),
-      expand.grid("Xmax"=seq(5e-8, 4e-7, 5e-8), "kCO2max"=seq(15, 50, 5)))
+min_time <- Inf
+argmin_time <- 0
+for (i in 1:nrow(rescue_grid)) {
+      if(rescue_grid[i, "rescue_fraction"] > 0) {
+            section_min <- min(as.numeric(rescue_jCPm_1[rescue_jCPm_1$X >= rescue_grid[i, "Xmin"] & rescue_jCPm_1$X < rescue_grid[i, "Xmax"] &
+            rescue_jCPm_1$kCO2 >= rescue_grid[i, "kCO2min"] & rescue_jCPm_1$kCO2 < rescue_grid[i, "kCO2max"] &
+            rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
 
-rescue_grid$rescue_fraction <- rep(NA, nrow(rescue_grid))
+            if(section_min < min_time) {
+                  min_time <- section_min
+                  argmin_time <- i
+            }
+      }
+}
+print(min_time)
+print(rescue_grid[argmin_time,])
+
+```
+# Mean rescue and min. rescue time for each combination of X and kCO2
+```{r}
+rescue_grid$meantime <- rep(NA, nrow(rescue_grid))
+rescue_grid$mintime <- rep(NA, nrow(rescue_grid))
 
 for (i in 1:nrow(rescue_grid)) {
-      rescue_grid[i, "rescue_fraction"] <- sum(with(rescue_kNPQ,
-            X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
-            kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"] &
-            rescue==TRUE)) / sum(with(rescue_kNPQ,
-                  X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
-                  kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"]))
+      if(rescue_grid[i, "rescue_fraction"] > 0) {
+            rescue_grid[i, "meantime"] <- mean(as.numeric(rescue_jCPm_1[rescue_jCPm_1$X >= rescue_grid[i, "Xmin"] & rescue_jCPm_1$X < rescue_grid[i, "Xmax"] &
+            rescue_jCPm_1$kCO2 >= rescue_grid[i, "kCO2min"] & rescue_jCPm_1$kCO2 < rescue_grid[i, "kCO2max"] &
+            rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
+
+            rescue_grid[i, "mintime"] <- min(as.numeric(rescue_jCPm_1[rescue_jCPm_1$X >= rescue_grid[i, "Xmin"] & rescue_jCPm_1$X < rescue_grid[i, "Xmax"] &
+            rescue_jCPm_1$kCO2 >= rescue_grid[i, "kCO2min"] & rescue_jCPm_1$kCO2 < rescue_grid[i, "kCO2max"] &
+            rescue_jCPm_1$rescue==TRUE, "rescue_time"]), na.rm=TRUE)
+      }
 }
 
-print(rescue_grid[rescue_grid$rescue_fraction == max(rescue_grid$rescue_fraction),])
+print(rescue_grid)
 ```
 
-## astar
-
+# Mean rescue and min. rescue time for each combination of X and kCO2
 ```{r}
-# We're going to check a grid of all the parameter combinations here
-rescue_grid <- cbind(expand.grid("Xmin"=seq(0, 3.5e-7, 5e-8), "kCO2min"=seq(10, 45, 5)),
-      expand.grid("Xmax"=seq(5e-8, 4e-7, 5e-8), "kCO2max"=seq(15, 50, 5)))
+#par(mfrow=c(2,2))
+plot(matrix(as.numeric(rescue_grid$meantime), byrow=TRUE, nrow=length(unique(rescue_grid$kCO2min)), dimnames=list(unique(rescue_grid$kCO2min), unique(rescue_grid$Xmin))),
+digits=2)
 
-rescue_grid$rescue_fraction <- rep(NA, nrow(rescue_grid))
 
-for (i in 1:nrow(rescue_grid)) {
-      rescue_grid[i, "rescue_fraction"] <- sum(with(rescue_astar,
-            X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
-            kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"] &
-            rescue==TRUE)) / sum(with(rescue_astar,
-                  X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
-                  kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"]))
-}
-
-print(rescue_grid[rescue_grid$rescue_fraction == max(rescue_grid$rescue_fraction),])
+# rescue_grid <- cbind(expand.grid("Lmin"=seq(0, 45, 5), "Nmin"=seq(0, 3.5e-6, 5e-7)),
+#       expand.grid("Lmax"=seq(5, 50, 5), "Nmax"=seq(5e-7, 4e-7, 5e-7)))
+#
+# rescue_grid$rescue_fraction <- rep(NA, nrow(rescue_grid))
+#
+# for (i in 1:nrow(rescue_grid)) {
+#       rescue_grid[i, "rescue_fraction"] <- sum(with(rescue_jCPm_1,
+#             L >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
+#             kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"] &
+#             rescue==TRUE)) / sum(with(rescue_jCPm_1,
+#                   X >= rescue_grid[i, "Xmin"] & X < rescue_grid[i, "Xmax"] &
+#                   kCO2 >= rescue_grid[i, "kCO2min"] & kCO2 < rescue_grid[i, "kCO2max"]))
+#}
 ```
