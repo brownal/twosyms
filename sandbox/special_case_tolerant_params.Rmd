@@ -37,15 +37,15 @@ detect_gr_change <- function(run) {
 # one-symbiont parameters
 pars1 <- def_pars(nsym=1)
 pars1$initS <- 1e-4
-pars1$kCO2 -> 37.5
+pars1$kCO2 <- 37.5
 
-# run simulations for 23000 days
+# run simulations for 3000 days
 time<-seq(1, 3000, 0.1)
 
 # draw sets of parameter values randomly
 # hopefully this will speed things up compared to looking over a grid
 
-draws = 10; #20000; # number of sets of random parameter combinations to look over
+draws = 40000; # number of sets of random parameter combinations to look over
 
 search_params <- data.frame("L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
                             "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
@@ -94,7 +94,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
 
          # two-symbiont parameters
-         pars2 <- def_pars(nsym=2)
+         pars2 <- coRal::def_pars(nsym=2)
          pars2$kCO2 <- 37.5
          pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
          pars2$astar[2] <- search_params[i, "astar"]
@@ -106,7 +106,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
 
 
-        run_2symb <- coRal::run_coral(time=time, env=env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
+        run_2symb <- coRal::run_coral(time=time, env=env, pars=pars2)
 
         # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
         # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
@@ -179,22 +179,22 @@ plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescu
 ```{r}
 par(mfrow=c(2, 3), pty="s")
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
      main="Nitrogen vs astar", xlab="astar", ylab="DIN", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
      main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="DIN", xlim=c(112, 224), ylim=c(0, 4e-6))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
       main="Nitrogen vs jSGm", xlab="jSGm", ylab="DIN", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
       main="Nitrogen vs jCPm", xlab="jCPm", ylab="DIN", xlim=c(1, 2.8), ylim=c(0, 4e-6))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
       main="Nitrogen vs kROS", xlab="kROS", ylab="DIN", xlim=c(80, 250), ylim=c(0, 4e-6))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"DIN"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
       main="Nitrogen vs b", xlab="b", ylab="DIN", xlim=c(1, 5), ylim=c(0, 4e-6))
 
 ```
