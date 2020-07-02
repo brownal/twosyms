@@ -2,7 +2,9 @@
 title: "Investigating how tolerant symbiont parameters affect rescue"
 author: "Ross Cunning and Alexandra Brown"
 date: "5/6/2020"
-output: html_document
+output:
+      html_document:
+            code_fold: hide
 ---
 
 ```{r}
@@ -165,458 +167,458 @@ rescue_tol_param <- data.frame(results, row.names=NULL)
 
 ```
 
-```{r}
-par(mfrow=c(2, 3), pty="s")
+# Plots of outcomes
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+```{r}
+# Thin points so all outcomes can be plotted together
+
+points_S_lives = rescue_tol_param[rescue_tol_param$reason == "S_lives",][1:min(500, sum(rescue_tol_param$reason == "S_lives")),];
+#points_rescue = rescue_tol_param[rescue_tol_param$reason == "rescue",][1:min(500, sum(rescue_tol_param$reason == "rescue")),];
+#points_T_dies = rescue_tol_param[rescue_tol_param$reason == "T_dies",][1:min(500, sum(rescue_tol_param$reason == "T_dies")),];
+points_T_dominates = rescue_tol_param[rescue_tol_param$reason == "T_dominates",][1:min(500, sum(rescue_tol_param$reason == "T_dominates")),];
+
+points_rescue = rescue_tol_param[(rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time <= 100),][1:min(500,
+      sum((rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time <= 100))),];
+
+points_T_dies = rescue_tol_param[(rescue_tol_param$reason == "T_dies") | ((rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time > 100)),][1:min(500,
+      sum((rescue_tol_param$reason == "T_dies") | ((rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time > 100)))),];
+```
+
+## Environmental & host parameters
+
+```{r}
+par(mfrow=c(3, 3), pty="s")
+
+plot(points_S_lives$L, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+     main="Nitrogen vs Light", xlab="L", ylab="N", xlim=c(0, 40), ylim=c(0, 4e-6))
+points(points_T_dies$L, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$L, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$L, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$L, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+     main="Food vs Light", xlab="L", ylab="X", xlim=c(0, 40), ylim=c(0, 4e-7))
+points(points_T_dies$L, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$L, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$L, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$L, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+      main="kCO2 vs Light", xlab="L", ylab="kCO2", xlim=c(0, 40), ylim=c(10, 50))
+points(points_T_dies$L, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$L, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$L, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$N, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+      main="Food vs Nitrogen", xlab="N", ylab="X", xlim=c(0, 4e-6), ylim=c(0, 4e-7))
+points(points_T_dies$N, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$N, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$N, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$N, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+      main="kCO2 vs Nitrogen", xlab="N", ylab="kCO2", xlim=c(0, 4e-6), ylim=c(10, 50))
+points(points_T_dies$N, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$N, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$N, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$X, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+      main="kCO2 vs Food", xlab="X", ylab="kCO2", xlim=c(0, 4e-7), ylim=c(10, 50))
+points(points_T_dies$X, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$X, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$X, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot.new()
+legend("topright", c("Recovers w/ S", "Recovers w/ T", "No recovery", "Recovers w/ S in \npresence of T"), col=c("red", "black", "green", "blue"), pch=19)
+
+```
+
+## Light vs. tolerant parameters
+
+```{r}
+par(mfrow=c(3,3), pty="s")
+
+plot(points_S_lives$astar, points_S_lives$L, pch=19, col=rgb(1, 0, 0, alpha=0.3),
      main="Light vs astar", xlab="astar", ylab="L", xlim=c(0.67, 1.34), ylim=c(0, 40))
+points(points_T_dies$astar, points_T_dies$L, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$astar, points_T_dominates$L, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$L, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs kNPQ", xlab="kNPQ", ylab="L", xlim=c(112, 224), ylim=c(0, 40))
+plot(points_S_lives$kNPQ, points_S_lives$L, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+    main="Light vs kNPQ", xlab="kNPQ", ylab="L", xlim=c(112, 224), ylim=c(0, 40))
+points(points_T_dies$kNPQ, points_T_dies$L, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kNPQ, points_T_dominates$L, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$L, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jSGm", xlab="jSGm", ylab="L", xlim=c(0.15, 0.25), ylim=c(0, 40))
+plot(points_S_lives$jSGm, points_S_lives$L, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Light vs jSGm", xlab="jSGm", ylab="L", xlim=c(0.15, 0.25), ylim=c(0, 40))
+points(points_T_dies$jSGm, points_T_dies$L, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jSGm, points_T_dominates$L, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$L, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jCPm", xlab="jCPm", ylab="L", xlim=c(1, 2.8), ylim=c(0, 40))
+plot(points_S_lives$jCPm, points_S_lives$L, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Light vs jCPm", xlab="jCPm", ylab="L", xlim=c(1, 2.8), ylim=c(0, 40))
+points(points_T_dies$jCPm, points_T_dies$L, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jCPm, points_T_dominates$L, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jCPm, points_rescue$L, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs kROS", xlab="kROS", ylab="L", xlim=c(80, 250), ylim=c(0, 40))
+plot(points_S_lives$kROS, points_S_lives$L, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Light vs kROS", xlab="kROS", ylab="L", xlim=c(80, 250), ylim=c(0, 40))
+points(points_T_dies$kROS, points_T_dies$L, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kROS, points_T_dominates$L, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kROS, points_rescue$L, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs b", xlab="b", ylab="L", xlim=c(1, 5), ylim=c(0, 40))
+plot(points_S_lives$b, points_S_lives$L, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Light vs b", xlab="b", ylab="L", xlim=c(1, 5), ylim=c(0, 40))
+points(points_T_dies$b, points_T_dies$L, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$b, points_T_dominates$L, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$b, points_rescue$L, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs astar", xlab="astar", ylab="DIN", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="DIN", xlim=c(112, 224), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jSGm", xlab="jSGm", ylab="DIN", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jCPm", xlab="jCPm", ylab="DIN", xlim=c(1, 2.8), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs kROS", xlab="kROS", ylab="DIN", xlim=c(80, 250), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs b", xlab="b", ylab="DIN", xlim=c(1, 5), ylim=c(0, 4e-6))
+plot.new()
+legend("topright", c("Recovers w/ S", "Recovers w/ T", "No recovery", "Recovers w/ S in \npresence of T"), col=c("red", "black", "green", "blue"), pch=19)
 
 ```
 
-```{r}
-par(mfrow=c(4, 4), pty="s")
+## Nitrogen vs. tolerant parameters
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+```{r}
+par(mfrow=c(3,3), pty="s")
+
+plot(points_S_lives$astar, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+     main="Nitrogen vs astar", xlab="astar", ylab="N", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
+points(points_T_dies$astar, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$astar, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$kNPQ, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+    main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="N", xlim=c(112, 224), ylim=c(0, 4e-6))
+points(points_T_dies$kNPQ, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kNPQ, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$jSGm, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Nitrogen vs jSGm", xlab="jSGm", ylab="N", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
+points(points_T_dies$jSGm, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jSGm, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$jCPm, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Nitrogen vs jCPm", xlab="jCPm", ylab="N", xlim=c(1, 2.8), ylim=c(0, 4e-6))
+points(points_T_dies$jCPm, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jCPm, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jCPm, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$kROS, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Nitrogen vs kROS", xlab="kROS", ylab="N", xlim=c(80, 250), ylim=c(0, 4e-6))
+points(points_T_dies$kROS, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kROS, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kROS, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$b, points_S_lives$N, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Nitrogen vs b", xlab="b", ylab="N", xlim=c(1, 5), ylim=c(0, 4e-6))
+points(points_T_dies$b, points_T_dies$N, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$b, points_T_dominates$N, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$b, points_rescue$N, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot.new()
+legend("topright", c("Recovers w/ S", "Recovers w/ T", "No recovery", "Recovers w/ S in \npresence of T"), col=c("red", "black", "green", "blue"), pch=19)
+```
+
+## Food vs. tolerant parameters
+
+```{r}
+par(mfrow=c(3,3), pty="s")
+
+plot(points_S_lives$astar, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+     main="Food vs astar", xlab="astar", ylab="X", xlim=c(0.67, 1.34), ylim=c(0, 4e-7))
+points(points_T_dies$astar, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$astar, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$kNPQ, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+    main="Food vs kNPQ", xlab="kNPQ", ylab="X", xlim=c(112, 224), ylim=c(0, 4e-7))
+points(points_T_dies$kNPQ, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kNPQ, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$jSGm, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Food vs jSGm", xlab="jSGm", ylab="X", xlim=c(0.15, 0.25), ylim=c(0, 4e-7))
+points(points_T_dies$jSGm, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jSGm, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$jCPm, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Food vs jCPm", xlab="jCPm", ylab="X", xlim=c(1, 2.8), ylim=c(0, 4e-7))
+points(points_T_dies$jCPm, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jCPm, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jCPm, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$kROS, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Food vs kROS", xlab="kROS", ylab="X", xlim=c(80, 250), ylim=c(0, 4e-7))
+points(points_T_dies$kROS, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kROS, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kROS, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$b, points_S_lives$X, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="Food vs b", xlab="b", ylab="X", xlim=c(1, 5), ylim=c(0, 4e-7))
+points(points_T_dies$b, points_T_dies$X, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$b, points_T_dominates$X, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$b, points_rescue$X, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot.new()
+legend("topright", c("Recovers w/ S", "Recovers w/ T", "No recovery", "Recovers w/ S in \npresence of T"), col=c("red", "black", "green", "blue"), pch=19)
+```
+
+## kCO2 vs. tolerant parameters
+
+```{r}
+par(mfrow=c(3,3), pty="s")
+
+plot(points_S_lives$astar, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+     main="kCO2 vs astar", xlab="astar", ylab="kCO2", xlim=c(0.67, 1.34), ylim=c(10, 50))
+points(points_T_dies$astar, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$astar, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$kNPQ, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+    main="kCO2 vs kNPQ", xlab="kNPQ", ylab="kCO2", xlim=c(112, 224), ylim=c(10, 50))
+points(points_T_dies$kNPQ, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kNPQ, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$jSGm, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="kCO2 vs jSGm", xlab="jSGm", ylab="kCO2", xlim=c(0.15, 0.25), ylim=c(10, 50))
+points(points_T_dies$jSGm, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jSGm, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$jCPm, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="kCO2 vs jCPm", xlab="jCPm", ylab="kCO2", xlim=c(1, 2.8), ylim=c(10, 50))
+points(points_T_dies$jCPm, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$jCPm, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jCPm, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$kROS, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="kCO2 vs kROS", xlab="kROS", ylab="kCO2", xlim=c(80, 250), ylim=c(10, 50))
+points(points_T_dies$kROS, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$kROS, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kROS, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_S_lives$b, points_S_lives$kCO2, pch=19, col=rgb(1, 0, 0, alpha=0.3),
+   main="kCO2 vs b", xlab="b", ylab="kCO2", xlim=c(1, 5), ylim=c(10, 50))
+points(points_T_dies$b, points_T_dies$kCO2, pch=19, col=rgb(0, 1, 0, alpha=0.3))
+points(points_T_dominates$b, points_T_dominates$kCO2, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$b, points_rescue$kCO2, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot.new()
+legend("topright", c("Recovers w/ S", "Recovers w/ T", "No recovery", "Recovers w/ S in \npresence of T"), col=c("red", "black", "green", "blue"), pch=19)
+```
+
+## Tolerant parameters vs. each other
+("Recovers with S" case not shown, because recovery with sensitive symbiont does not depend on tolerant parameters)
+
+```{r}
+par(mfrow=c(3, 3), pty="s")
+
+plot(points_T_dies$astar, points_T_dies$kNPQ, pch=19, col=rgb(0, 1, 0, alpha=0.3),
      main="kNPQ vs astar", xlab="astar", ylab="kNPQ", xlim=c(0.67, 1.34), ylim=c(112, 224))
+points(points_T_dominates$astar, points_T_dominates$kNPQ, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$kNPQ, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jSGm vs astar", xlab="astar", ylab="jSGm", xlim=c(0.67, 1.34), ylim=c(0.15, 0.25))
+plot(points_T_dies$astar, points_T_dies$jSGm, pch=19, col=rgb(0, 1, 0, alpha=0.3),
+     main="jSGm vs astar", xlab="astar", ylab="jSGm", xlim=c(0.67, 1.34), ylim=c(0.15, 0.25))
+points(points_T_dominates$astar, points_T_dominates$jSGm, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$jSGm, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$astar, points_T_dies$jCPm, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="jCPm vs astar", xlab="astar", ylab="jCPm", xlim=c(0.67, 1.34), ylim=c(1, 2.8))
+points(points_T_dominates$astar, points_T_dominates$jCPm, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$jCPm, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$astar, points_T_dies$kROS, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="kROS vs astar", xlab="astar", ylab="kROS", xlim=c(0.67, 1.34), ylim=c(80, 250))
+points(points_T_dominates$astar, points_T_dominates$kROS, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$kROS, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"astar"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs b", xlab="astar", ylab="b", xlim=c(0.67, 1.34), ylim=c(1, 5))
+plot(points_T_dies$astar, points_T_dies$b, pch=19, col=rgb(0, 1, 0, alpha=0.3),
+      main="b vs astar", xlab="astar", ylab="b", xlim=c(0.67, 1.34), ylim=c(1, 5))
+points(points_T_dominates$astar, points_T_dominates$b, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$astar, points_rescue$b, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="jSGm vs kNPQ", xlab="kNPQ", ylab="jSGm", xlim=c(112, 224), ylim=c(0.15, 0.25))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$kNPQ, points_T_dies$jSGm, pch=19, col=rgb(0, 1, 0, alpha=0.3),
+      main="jSGm vs kNPQ", xlab="kNPQ", ylab="jSGm", xlim=c(112, 224), ylim=c(0.15, 0.25))
+points(points_T_dominates$kNPQ, points_T_dominates$jSGm, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$jSGm, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot(points_T_dies$kNPQ, points_T_dies$jCPm, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="jCPm vs kNPQ", xlab="kNPQ", ylab="jCPm", xlim=c(112, 224), ylim=c(1, 2.8))
+points(points_T_dominates$kNPQ, points_T_dominates$jCPm, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$jCPm, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$kNPQ, points_T_dies$kROS, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="kROS vs kNPQ", xlab="kNPQ", ylab="kROS", xlim=c(112, 224), ylim=c(80, 250))
+points(points_T_dominates$kNPQ, points_T_dominates$kROS, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$kROS, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kNPQ"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$kNPQ, points_T_dies$b, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="b vs kNPQ", xlab="kNPQ", ylab="b", xlim=c(112, 224), ylim=c(1, 5))
+points(points_T_dominates$kNPQ, points_T_dominates$b, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kNPQ, points_rescue$b, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+
+plot(points_T_dies$jSGm, points_T_dies$jCPm, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="jCPm vs jSGm", xlab="jSGm", ylab="jCPm", xlim=c(0.15, 0.25), ylim=c(1, 2.8))
+points(points_T_dominates$jSGm, points_T_dominates$jCPm, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$jCPm, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$jSGm, points_T_dies$kROS, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="kROS vs jSGm", xlab="jSGm", ylab="kROS", xlim=c(0.15, 0.25), ylim=c(80, 250))
+points(points_T_dominates$jSGm, points_T_dominates$kROS, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$kROS, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jSGm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$jSGm, points_T_dies$b, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="b vs jSGm", xlab="jSGm", ylab="b", xlim=c(0.15, 0.25), ylim=c(1, 5))
+points(points_T_dominates$jSGm, points_T_dominates$b, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jSGm, points_rescue$b, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$jCPm, points_T_dies$kROS, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="kROS vs jCPm", xlab="jCPm", ylab="kROS", xlim=c(1, 2.8), ylim=c(80, 250))
+points(points_T_dominates$jCPm, points_T_dominates$kROS, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jCPm, points_rescue$kROS, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"jCPm"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$jCPm, points_T_dies$b, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="b vs jCPm", xlab="jCPm", ylab="b", xlim=c(1, 2.8), ylim=c(1, 5))
+points(points_T_dominates$jCPm, points_T_dominates$b, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$jCPm, points_rescue$b, pch=19, col=rgb(0, 0, 1, alpha=0.3))
 
-plot(rescue_tol_param[rescue_tol_param$rescue==TRUE,"kROS"], rescue_tol_param[rescue_tol_param$rescue==TRUE,"b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
+plot(points_T_dies$kROS, points_T_dies$b, pch=19, col=rgb(0, 1, 0, alpha=0.3),
       main="b vs kROS", xlab="kROS", ylab="b", xlim=c(80, 250), ylim=c(1, 5))
-
-```
-
-# S lives
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs astar", xlab="astar", ylab="L", xlim=c(0.67, 1.34), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="S_lives","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs kNPQ", xlab="kNPQ", ylab="L", xlim=c(112, 224), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jSGm", xlab="jSGm", ylab="L", xlim=c(0.15, 0.25), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jCPm", xlab="jCPm", ylab="L", xlim=c(1, 2.8), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], rescue_tol_param[rescue_tol_param$reason=="S_lives","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs kROS", xlab="kROS", ylab="L", xlim=c(80, 250), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], rescue_tol_param[rescue_tol_param$reason=="S_lives","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs b", xlab="b", ylab="L", xlim=c(1, 5), ylim=c(0, 40))
-
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs astar", xlab="astar", ylab="DIN", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="S_lives","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="DIN", xlim=c(112, 224), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jSGm", xlab="jSGm", ylab="DIN", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jCPm", xlab="jCPm", ylab="DIN", xlim=c(1, 2.8), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], rescue_tol_param[rescue_tol_param$reason=="S_lives","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs kROS", xlab="kROS", ylab="DIN", xlim=c(80, 250), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], rescue_tol_param[rescue_tol_param$reason=="S_lives","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs b", xlab="b", ylab="DIN", xlim=c(1, 5), ylim=c(0, 4e-6))
-
-```
-
-```{r}
-par(mfrow=c(4, 4), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="kNPQ vs astar", xlab="astar", ylab="kNPQ", xlim=c(0.67, 1.34), ylim=c(112, 224))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jSGm vs astar", xlab="astar", ylab="jSGm", xlim=c(0.67, 1.34), ylim=c(0.15, 0.25))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs astar", xlab="astar", ylab="jCPm", xlim=c(0.67, 1.34), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs astar", xlab="astar", ylab="kROS", xlim=c(0.67, 1.34), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","astar"], rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs b", xlab="astar", ylab="b", xlim=c(0.67, 1.34), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="jSGm vs kNPQ", xlab="kNPQ", ylab="jSGm", xlim=c(112, 224), ylim=c(0.15, 0.25))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs kNPQ", xlab="kNPQ", ylab="jCPm", xlim=c(112, 224), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs kNPQ", xlab="kNPQ", ylab="kROS", xlim=c(112, 224), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs kNPQ", xlab="kNPQ", ylab="b", xlim=c(112, 224), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs jSGm", xlab="jSGm", ylab="jCPm", xlim=c(0.15, 0.25), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs jSGm", xlab="jSGm", ylab="kROS", xlim=c(0.15, 0.25), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jSGm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs jSGm", xlab="jSGm", ylab="b", xlim=c(0.15, 0.25), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs jCPm", xlab="jCPm", ylab="kROS", xlim=c(1, 2.8), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","jCPm"], rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs jCPm", xlab="jCPm", ylab="b", xlim=c(1, 2.8), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="S_lives","kROS"], rescue_tol_param[rescue_tol_param$reason=="S_lives","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs kROS", xlab="kROS", ylab="b", xlim=c(80, 250), ylim=c(1, 5))
-
-```
-
-# T dies
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs astar", xlab="astar", ylab="L", xlim=c(0.67, 1.34), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dies","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs kNPQ", xlab="kNPQ", ylab="L", xlim=c(112, 224), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jSGm", xlab="jSGm", ylab="L", xlim=c(0.15, 0.25), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jCPm", xlab="jCPm", ylab="L", xlim=c(1, 2.8), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], rescue_tol_param[rescue_tol_param$reason=="T_dies","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs kROS", xlab="kROS", ylab="L", xlim=c(80, 250), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], rescue_tol_param[rescue_tol_param$reason=="T_dies","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs b", xlab="b", ylab="L", xlim=c(1, 5), ylim=c(0, 40))
-
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs astar", xlab="astar", ylab="DIN", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dies","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="DIN", xlim=c(112, 224), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jSGm", xlab="jSGm", ylab="DIN", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jCPm", xlab="jCPm", ylab="DIN", xlim=c(1, 2.8), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], rescue_tol_param[rescue_tol_param$reason=="T_dies","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs kROS", xlab="kROS", ylab="DIN", xlim=c(80, 250), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], rescue_tol_param[rescue_tol_param$reason=="T_dies","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs b", xlab="b", ylab="DIN", xlim=c(1, 5), ylim=c(0, 4e-6))
-
-```
-
-```{r}
-par(mfrow=c(4, 4), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="kNPQ vs astar", xlab="astar", ylab="kNPQ", xlim=c(0.67, 1.34), ylim=c(112, 224))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jSGm vs astar", xlab="astar", ylab="jSGm", xlim=c(0.67, 1.34), ylim=c(0.15, 0.25))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs astar", xlab="astar", ylab="jCPm", xlim=c(0.67, 1.34), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs astar", xlab="astar", ylab="kROS", xlim=c(0.67, 1.34), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs b", xlab="astar", ylab="b", xlim=c(0.67, 1.34), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="jSGm vs kNPQ", xlab="kNPQ", ylab="jSGm", xlim=c(112, 224), ylim=c(0.15, 0.25))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs kNPQ", xlab="kNPQ", ylab="jCPm", xlim=c(112, 224), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs kNPQ", xlab="kNPQ", ylab="kROS", xlim=c(112, 224), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs kNPQ", xlab="kNPQ", ylab="b", xlim=c(112, 224), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs jSGm", xlab="jSGm", ylab="jCPm", xlim=c(0.15, 0.25), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs jSGm", xlab="jSGm", ylab="kROS", xlim=c(0.15, 0.25), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs jSGm", xlab="jSGm", ylab="b", xlim=c(0.15, 0.25), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs jCPm", xlab="jCPm", ylab="kROS", xlim=c(1, 2.8), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs jCPm", xlab="jCPm", ylab="b", xlim=c(1, 2.8), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dies","kROS"], rescue_tol_param[rescue_tol_param$reason=="T_dies","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs kROS", xlab="kROS", ylab="b", xlim=c(80, 250), ylim=c(1, 5))
-
-```
-
-# T dominates
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs astar", xlab="astar", ylab="L", xlim=c(0.67, 1.34), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Light vs kNPQ", xlab="kNPQ", ylab="L", xlim=c(112, 224), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jSGm", xlab="jSGm", ylab="L", xlim=c(0.15, 0.25), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs jCPm", xlab="jCPm", ylab="L", xlim=c(1, 2.8), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs kROS", xlab="kROS", ylab="L", xlim=c(80, 250), ylim=c(0, 40))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","L"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Light vs b", xlab="b", ylab="L", xlim=c(1, 5), ylim=c(0, 40))
-
-```
-
-```{r}
-par(mfrow=c(2, 3), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs astar", xlab="astar", ylab="DIN", xlim=c(0.67, 1.34), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="Nitrogen vs kNPQ", xlab="kNPQ", ylab="DIN", xlim=c(112, 224), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jSGm", xlab="jSGm", ylab="DIN", xlim=c(0.15, 0.25), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs jCPm", xlab="jCPm", ylab="DIN", xlim=c(1, 2.8), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs kROS", xlab="kROS", ylab="DIN", xlim=c(80, 250), ylim=c(0, 4e-6))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","N"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="Nitrogen vs b", xlab="b", ylab="DIN", xlim=c(1, 5), ylim=c(0, 4e-6))
-
-```
-
-```{r}
-par(mfrow=c(4, 4), pty="s")
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="kNPQ vs astar", xlab="astar", ylab="kNPQ", xlim=c(0.67, 1.34), ylim=c(112, 224))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jSGm vs astar", xlab="astar", ylab="jSGm", xlim=c(0.67, 1.34), ylim=c(0.15, 0.25))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs astar", xlab="astar", ylab="jCPm", xlim=c(0.67, 1.34), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs astar", xlab="astar", ylab="kROS", xlim=c(0.67, 1.34), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","astar"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs b", xlab="astar", ylab="b", xlim=c(0.67, 1.34), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-     main="jSGm vs kNPQ", xlab="kNPQ", ylab="jSGm", xlim=c(112, 224), ylim=c(0.15, 0.25))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs kNPQ", xlab="kNPQ", ylab="jCPm", xlim=c(112, 224), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs kNPQ", xlab="kNPQ", ylab="kROS", xlim=c(112, 224), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kNPQ"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs kNPQ", xlab="kNPQ", ylab="b", xlim=c(112, 224), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="jCPm vs jSGm", xlab="jSGm", ylab="jCPm", xlim=c(0.15, 0.25), ylim=c(1, 2.8))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs jSGm", xlab="jSGm", ylab="kROS", xlim=c(0.15, 0.25), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jSGm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs jSGm", xlab="jSGm", ylab="b", xlim=c(0.15, 0.25), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="kROS vs jCPm", xlab="jCPm", ylab="kROS", xlim=c(1, 2.8), ylim=c(80, 250))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","jCPm"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs jCPm", xlab="jCPm", ylab="b", xlim=c(1, 2.8), ylim=c(1, 5))
-
-plot(rescue_tol_param[rescue_tol_param$reason=="T_dominates","kROS"], rescue_tol_param[rescue_tol_param$reason=="T_dominates","b"], pch=19, col=rgb(0, 0, 1, alpha=0.1),
-      main="b vs kROS", xlab="kROS", ylab="b", xlim=c(80, 250), ylim=c(1, 5))
+points(points_T_dominates$kROS, points_T_dominates$b, pch=19, col=rgb(0, 0, 0, alpha=0.3))
+points(points_rescue$kROS, points_rescue$b, pch=19, col=rgb(0, 0, 1, alpha=0.3))
+
+plot.new()
+legend("topright", c("Recovers w/ T", "No recovery", "Recovers w/ S in \npresence of T"), col=c("black", "green", "blue"), pch=19)
 
 ```
 
 ```{r, cache=TRUE}
-results_stan <- lapply(rescue_tol_param$reason,
-      function(r) {
-            if(r=="S_lives") {
-                  1
-            } else if (r=="rescue") {
-                  2
-            } else if (r=="T_dies") {
-                  3
-            } else if (r=="T_dominates") {
-                  4
-            } else {
-                  NA
-            }})
-
-results_stan <- as.numeric(results_stan)
-
-predictors_stan <- with(rescue_tol_param, {data.frame(L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
-      astar=as.numeric(astar), kNPQ=as.numeric(kNPQ), jSGm=as.numeric(jSGm), jCPm=as.numeric(jCPm),
-      kROS=as.numeric(kROS), b=as.numeric(b))})
-
-predictors_stan <- as.matrix(predictors_stan)
-
-ml_stan <- stan("multilogit.stan", data=list("K"=4, # number of outcomes (S_lives = 1, Rescue =2, T_dies=3, T_dominates=4)
-                                  "N"=length(results_stan), # number of data points
-                                  "D"=ncol(predictors_stan), # number of predictors (variables we changed)
-                                  "y"=results_stan, # vector of observed outcomes
-                                  "x"=predictors_stan), # matrix of observations and predictors
-                      chains=8, iter=2000, cores=8)
+# results_stan <- lapply(rescue_tol_param$reason,
+#       function(r) {
+#             if(r=="S_lives") {
+#                   1
+#             } else if (r=="rescue") {
+#                   2
+#             } else if (r=="T_dies") {
+#                   3
+#             } else if (r=="T_dominates") {
+#                   4
+#             } else {
+#                   NA
+#             }})
+#
+# results_stan <- as.numeric(results_stan)
+#
+# predictors_stan <- with(rescue_tol_param, {data.frame(L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+#       astar=as.numeric(astar), kNPQ=as.numeric(kNPQ), jSGm=as.numeric(jSGm), jCPm=as.numeric(jCPm),
+#       kROS=as.numeric(kROS), b=as.numeric(b))})
+#
+# predictors_stan <- as.matrix(predictors_stan)
+#
+# ml_stan <- stan("multilogit.stan", data=list("K"=4, # number of outcomes (S_lives = 1, Rescue =2, T_dies=3, T_dominates=4)
+#                                   "N"=length(results_stan), # number of data points
+#                                   "D"=ncol(predictors_stan), # number of predictors (variables we changed)
+#                                   "y"=results_stan, # vector of observed outcomes
+#                                   "x"=predictors_stan), # matrix of observations and predictors
+#                       chains=8, iter=2000, cores=8)
 ```
 
 ```{r}
-print(ml_stan)
+# print(ml_stan)
+#
+# slives_stan <- as.matrix(ml_stan, pars = list("beta[1,1]", "beta[2,1]", "beta[3,1]", "beta[4,1]", "beta[5,1]",
+#       "beta[6,1]", "beta[7,1]", "beta[8,1]", "beta[9,1]", "beta[10,1]"))
+#
+# rescue_stan <- as.matrix(ml_stan, pars = list("beta[1,2]", "beta[2,2]", "beta[3,2]", "beta[4,2]", "beta[5,2]",
+#       "beta[6,2]", "beta[7,2]", "beta[8,2]", "beta[9,2]", "beta[10,2]"))  
+#
+# tdies_stan <- as.matrix(ml_stan, pars = list("beta[1,3]", "beta[2,3]", "beta[3,3]", "beta[4,3]", "beta[5,3]",
+#       "beta[6,3]", "beta[7,3]", "beta[8,3]", "beta[9,3]", "beta[10,3]"))
+#
+# tdominates_stan <- as.matrix(ml_stan, pars = list("beta[1,4]", "beta[2,4]", "beta[3,4]", "beta[4,4]", "beta[5,4]",
+#       "beta[6,4]", "beta[7,4]", "beta[8,4]", "beta[9,4]", "beta[10,4]"))   
+#
+#
+# p1 <- mcmc_intervals(slives_stan) + scale_y_discrete(labels = c("L", "N", "X",
+#       "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
+#       ggtitle("Sensitive symb. allows host survival") + xlab("Slope of contribution to probability (softmax scale)")
+#
+# p2 <- mcmc_intervals(rescue_stan) + scale_y_discrete(labels = c("L", "N", "X",
+#       "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
+#       ggtitle("RESCUE") + xlab("Slope of contribution to probability (softmax scale)")
+#
+# p3 <- mcmc_intervals(tdies_stan) + scale_y_discrete(labels = c("L", "N", "X",
+#       "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
+#       ggtitle("Neither symb. allows host survival") + xlab("Slope of contribution to probability (softmax scale)")
+#
+# p4 <- mcmc_intervals(tdominates_stan) + scale_y_discrete(labels = c("L", "N", "X",
+#       "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
+#       ggtitle("Tolerant symb. alone allows survival; takes over") + xlab("Slope of contribution to probability (softmax scale)")
+#
+# grid.arrange(p1, p2, p3, p4, nrow=2)
+```
 
-slives_stan <- as.matrix(ml_stan, pars = list("beta[1,1]", "beta[2,1]", "beta[3,1]", "beta[4,1]", "beta[5,1]",
-      "beta[6,1]", "beta[7,1]", "beta[8,1]", "beta[9,1]", "beta[10,1]"))
+# What environmental, host, and tolerant symbiont traits affect time to recovery?
+For the case where S. lives but only when T. is also present (the "rescue" case)
 
-rescue_stan <- as.matrix(ml_stan, pars = list("beta[1,2]", "beta[2,2]", "beta[3,2]", "beta[4,2]", "beta[5,2]",
-      "beta[6,2]", "beta[7,2]", "beta[8,2]", "beta[9,2]", "beta[10,2]"))  
+```{r, cache=TRUE, results=FALSE, message=FALSE}
 
-tdies_stan <- as.matrix(ml_stan, pars = list("beta[1,3]", "beta[2,3]", "beta[3,3]", "beta[4,3]", "beta[5,3]",
-      "beta[6,3]", "beta[7,3]", "beta[8,3]", "beta[9,3]", "beta[10,3]"))
+stan_data <- rescue_tol_param[rescue_tol_param$rescue==TRUE,];
 
-tdominates_stan <- as.matrix(ml_stan, pars = list("beta[1,4]", "beta[2,4]", "beta[3,4]", "beta[4,4]", "beta[5,4]",
-      "beta[6,4]", "beta[7,4]", "beta[8,4]", "beta[9,4]", "beta[10,4]"))   
+recovery_time_model <- stan("rescue_time.stan",
+      data=list("P"=nrow(stan_data),
+                "y"=as.numeric(stan_data$rescue_time),
+                "L"=as.numeric(stan_data$L),
+                "N"=as.numeric(stan_data$N),
+                "X"=as.numeric(stan_data$X),
+                "kCO2"=as.numeric(stan_data$kCO2),
+                "kNPQ"=as.numeric(stan_data$kNPQ),
+                "astar"=as.numeric(stan_data$astar),
+                "jSGm"=as.numeric(stan_data$jSGm),
+                "jCPm"=as.numeric(stan_data$jCPm),
+                "kROS"=as.numeric(stan_data$kROS),
+                "b"=as.numeric(stan_data$b)),
+                chains=4, iter=2000, cores=4, refresh=100)
+```
+
+```{r, results=FALSE, message=FALSE}
+
+p_alphabeta <- plot(recovery_time_model, pars=c("alpha", "beta_L", "beta_N", "beta_X", "beta_kCO2", "beta_kNPQ", "beta_astar", "beta_jSGm", "beta_jCPm", "beta_kROS", "beta_b"));
+
+p_gammaL <- plot(recovery_time_model, pars=c("gamma_LxL", "gamma_LxN", "gamma_LxX", "gamma_LxkCO2", "gamma_LxkNPQ", "gamma_Lxastar", "gamma_LxjSGm", "gamma_LxjCPm", "gamma_LxkROS", "gamma_Lxb"));
+
+p_gammaN <- plot(recovery_time_model, pars=c("gamma_NxN", "gamma_NxX", "gamma_NxkCO2", "gamma_NxkNPQ", "gamma_Nxastar", "gamma_NxjSGm", "gamma_NxjCPm", "gamma_NxkROS", "gamma_Nxb"));
+
+p_gammaX <- plot(recovery_time_model, pars=c("gamma_XxX", "gamma_XxkCO2", "gamma_XxkNPQ", "gamma_Xxastar", "gamma_XxjSGm", "gamma_XxjCPm", "gamma_XxkROS", "gamma_Xxb"));
+
+p_gammakCO2 <- plot(recovery_time_model, pars=c("gamma_kCO2xkCO2", "gamma_kCO2xkNPQ", "gamma_kCO2xastar", "gamma_kCO2xjSGm", "gamma_kCO2xjCPm", "gamma_kCO2xkROS", "gamma_kCO2xb"));
+
+p_gammakNPQ <- plot(recovery_time_model, pars=c("gamma_kNPQxkNPQ", "gamma_kNPQxastar", "gamma_kNPQxjSGm", "gamma_kNPQxjCPm", "gamma_kNPQxkROS", "gamma_kNPQxb"));
+
+p_gammaastar <- plot(recovery_time_model, pars=c("gamma_astarxastar", "gamma_astarxjSGm", "gamma_astarxjCPm", "gamma_astarxkROS", "gamma_astarxb"));
+
+p_gammajSGm <- plot(recovery_time_model, pars=c("gamma_jSGmxjSGm", "gamma_jSGmxjCPm", "gamma_jSGmxkROS", "gamma_jSGmxb"));
+
+p_gammarest <- plot(recovery_time_model, pars=c("gamma_jCPmxjCPm", "gamma_jCPmxkROS", "gamma_jCPmxb", "gamma_kROSxkROS", "gamma_kROSxb", "gamma_bxb"));
+
+```
+
+## Summary of Stan results
+
+```{r}
+
+p_alphabeta
+grid.arrange(p_gammaL, p_gammaN, p_gammaX, p_gammakCO2, nrow=2)
+grid.arrange(p_gammakNPQ, p_gammaastar, p_gammajSGm, p_gammarest, nrow=2)
 
 
-p1 <- mcmc_intervals(slives_stan) + scale_y_discrete(labels = c("L", "N", "X",
-      "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
-      ggtitle("Sensitive symb. allows host survival") + xlab("Slope of contribution to probability (softmax scale)")
+print(summary(recovery_time_model, probs = c(0.50))$summary)
 
-p2 <- mcmc_intervals(rescue_stan) + scale_y_discrete(labels = c("L", "N", "X",
-      "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
-      ggtitle("RESCUE") + xlab("Slope of contribution to probability (softmax scale)")
-
-p3 <- mcmc_intervals(tdies_stan) + scale_y_discrete(labels = c("L", "N", "X",
-      "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
-      ggtitle("Neither symb. allows host survival") + xlab("Slope of contribution to probability (softmax scale)")
-
-p4 <- mcmc_intervals(tdominates_stan) + scale_y_discrete(labels = c("L", "N", "X",
-      "kCO2", "astar", "kNPQ", "jSGm", "jCPm", "kROS", "b")) +
-      ggtitle("Tolerant symb. alone allows survival; takes over") + xlab("Slope of contribution to probability (softmax scale)")
-
-grid.arrange(p1, p2, p3, p4, nrow=2)
 ```
