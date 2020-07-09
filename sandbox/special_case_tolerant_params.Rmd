@@ -26,6 +26,7 @@ options(mc.cores = 8)
 library("bayesplot")
 library("ggplot2")
 library("gridExtra")
+library("adegenet")
 options(repr.plot.res=240)
 ```
 ## A function for detecting when the host growth rate changes sign
@@ -98,11 +99,15 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
     # reason = "T_dies" -> tolerant symbiont unable to rescue host
     # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
     # reason = "rescue" -> rescue occurred
-    reason <- "S_lives"
+    reason <- NA
+    rescue_time <- NA
 
     # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
     # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
-    rescue_time <- NA
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "S_lives"
+          rescue_time <- detect_gr_change(run_1symb)
+    }
 
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
 
@@ -124,6 +129,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
         # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
         # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
         reason <- "T_dies"
+        rescue_time <- NA
 
         # if the tolerant symbiont rescues the sensitive symbiont, we want to record how long that takes to happen
         # if that doesn't happen, we'll record the time to rescue as NA
@@ -136,6 +142,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
             # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
             # set reason to "T_dominates" for now because this is what must have happened if rescue did not occur
             reason <- "T_dominates"
+            rescue_time <- detect_gr_change(run_2symb)
 
             if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
 
@@ -172,16 +179,26 @@ rescue_tol_param <- data.frame(results, row.names=NULL)
 ```{r}
 # Thin points so all outcomes can be plotted together
 
-points_S_lives = rescue_tol_param[rescue_tol_param$reason == "S_lives",][1:min(500, sum(rescue_tol_param$reason == "S_lives")),];
+points_S_lives = rescue_tol_param[(rescue_tol_param$reason == "S_lives")  & (rescue_tol_param$rescue_time <= 100),];
 #points_rescue = rescue_tol_param[rescue_tol_param$reason == "rescue",][1:min(500, sum(rescue_tol_param$reason == "rescue")),];
 #points_T_dies = rescue_tol_param[rescue_tol_param$reason == "T_dies",][1:min(500, sum(rescue_tol_param$reason == "T_dies")),];
-points_T_dominates = rescue_tol_param[rescue_tol_param$reason == "T_dominates",][1:min(500, sum(rescue_tol_param$reason == "T_dominates")),];
+points_T_dominates = rescue_tol_param[(rescue_tol_param$reason == "T_dominates") & (rescue_tol_param$rescue_time <= 100),];
 
-points_rescue = rescue_tol_param[(rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time <= 100),][1:min(500,
-      sum((rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time <= 100))),];
+points_rescue = rescue_tol_param[(rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time <= 100),];
 
-points_T_dies = rescue_tol_param[(rescue_tol_param$reason == "T_dies") | ((rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time > 100)),][1:min(500,
-      sum((rescue_tol_param$reason == "T_dies") | ((rescue_tol_param$reason == "rescue") & (rescue_tol_param$rescue_time > 100)))),];
+points_T_dies = rescue_tol_param[(rescue_tol_param$reason == "T_dies") | ((rescue_tol_param$reason != "T_dies") & (rescue_tol_param$rescue_time > 100)),];
+
+
+plot_count_S_lives = round(nrow(points_S_lives)/nrow(rescue_tol_param) * 2000, 0);
+plot_count_T_dominates = round(nrow(points_T_dominates)/nrow(rescue_tol_param) * 2000, 0);
+plot_count_rescue = round(nrow(points_rescue)/nrow(rescue_tol_param) * 2000, 0);
+plot_count_T_dies = round(nrow(points_T_dies)/nrow(rescue_tol_param) * 2000,0);
+
+points_S_lives = points_S_lives[1:plot_count_S_lives,];
+points_T_dominates = points_T_dominates[1:plot_count_T_dominates,];
+points_rescue = points_rescue[1:plot_count_rescue,];
+points_T_dies = points_T_dies[1:plot_count_T_dies,];
+
 ```
 
 ## Environmental & host parameters
@@ -570,55 +587,55 @@ For the case where S. lives but only when T. is also present (the "rescue" case)
 
 ```{r, cache=TRUE, results=FALSE, message=FALSE}
 
-stan_data <- rescue_tol_param[rescue_tol_param$rescue==TRUE,];
+dapc_grp <- unlist(rescue_tol_param$reason)
 
-recovery_time_model <- stan("rescue_time.stan",
-      data=list("P"=nrow(stan_data),
-                "y"=as.numeric(stan_data$rescue_time),
-                "L"=as.numeric(stan_data$L),
-                "N"=as.numeric(stan_data$N),
-                "X"=as.numeric(stan_data$X),
-                "kCO2"=as.numeric(stan_data$kCO2),
-                "kNPQ"=as.numeric(stan_data$kNPQ),
-                "astar"=as.numeric(stan_data$astar),
-                "jSGm"=as.numeric(stan_data$jSGm),
-                "jCPm"=as.numeric(stan_data$jCPm),
-                "kROS"=as.numeric(stan_data$kROS),
-                "b"=as.numeric(stan_data$b)),
-                chains=4, iter=2000, cores=4, refresh=100)
-```
+for (i in 1:nrow(rescue_tol_param)) {
+      if ((is.na(rescue_tol_param[i, "rescue_time"]) == FALSE) & (rescue_tol_param[i, "rescue_time"] > 100)) {
+            dapc_grp[[i]] <- "T_dies"
+      }
+}
 
-```{r, results=FALSE, message=FALSE}
+dapc_grp <- as.factor(dapc_grp)
 
-p_alphabeta <- plot(recovery_time_model, pars=c("alpha", "beta_L", "beta_N", "beta_X", "beta_kCO2", "beta_kNPQ", "beta_astar", "beta_jSGm", "beta_jCPm", "beta_kROS", "beta_b"));
+dapc_x <- rescue_tol_param
+dapc_x$reason <- NULL
+dapc_x$rescue <- NULL
+dapc_x$rescue_time <- NULL
+dapc_x[] <- lapply(dapc_x, as.numeric)
 
-p_gammaL <- plot(recovery_time_model, pars=c("gamma_LxL", "gamma_LxN", "gamma_LxX", "gamma_LxkCO2", "gamma_LxkNPQ", "gamma_Lxastar", "gamma_LxjSGm", "gamma_LxjCPm", "gamma_LxkROS", "gamma_Lxb"));
-
-p_gammaN <- plot(recovery_time_model, pars=c("gamma_NxN", "gamma_NxX", "gamma_NxkCO2", "gamma_NxkNPQ", "gamma_Nxastar", "gamma_NxjSGm", "gamma_NxjCPm", "gamma_NxkROS", "gamma_Nxb"));
-
-p_gammaX <- plot(recovery_time_model, pars=c("gamma_XxX", "gamma_XxkCO2", "gamma_XxkNPQ", "gamma_Xxastar", "gamma_XxjSGm", "gamma_XxjCPm", "gamma_XxkROS", "gamma_Xxb"));
-
-p_gammakCO2 <- plot(recovery_time_model, pars=c("gamma_kCO2xkCO2", "gamma_kCO2xkNPQ", "gamma_kCO2xastar", "gamma_kCO2xjSGm", "gamma_kCO2xjCPm", "gamma_kCO2xkROS", "gamma_kCO2xb"));
-
-p_gammakNPQ <- plot(recovery_time_model, pars=c("gamma_kNPQxkNPQ", "gamma_kNPQxastar", "gamma_kNPQxjSGm", "gamma_kNPQxjCPm", "gamma_kNPQxkROS", "gamma_kNPQxb"));
-
-p_gammaastar <- plot(recovery_time_model, pars=c("gamma_astarxastar", "gamma_astarxjSGm", "gamma_astarxjCPm", "gamma_astarxkROS", "gamma_astarxb"));
-
-p_gammajSGm <- plot(recovery_time_model, pars=c("gamma_jSGmxjSGm", "gamma_jSGmxjCPm", "gamma_jSGmxkROS", "gamma_jSGmxb"));
-
-p_gammarest <- plot(recovery_time_model, pars=c("gamma_jCPmxjCPm", "gamma_jCPmxkROS", "gamma_jCPmxb", "gamma_kROSxkROS", "gamma_kROSxb", "gamma_bxb"));
+library("plyr")
+data_2symb <- dapc_x
+data_2symb$outcome <- dapc_grp
+data_2symb$outcome <- revalue(data_2symb$outcome, c("S_lives"="recovers_S", "T_dominates"="recovers_T", "T_dies"="no_recovery", "rescue"="recovers_rescue"))
+save(data_2symb, file="data_2symb.Rda")
+#
+# my_dapc <- dapc(dapc_x, dapc_grp)
 
 ```
 
-## Summary of Stan results
 
 ```{r}
 
-p_alphabeta
-grid.arrange(p_gammaL, p_gammaN, p_gammaX, p_gammakCO2, nrow=2)
-grid.arrange(p_gammakNPQ, p_gammaastar, p_gammajSGm, p_gammarest, nrow=2)
+# print(my_dapc)
+#
+# summary(my_dapc)
+#
+# scatter(my_dapc)
 
+#stan_data <- rescue_tol_param[rescue_tol_param$rescue==TRUE,];
 
-print(summary(recovery_time_model, probs = c(0.50))$summary)
-
+# recovery_time_model <- stan("rescue_time.stan",
+#       data=list("P"=nrow(stan_data),
+#                 "y"=as.numeric(stan_data$rescue_time),
+#                 "L"=as.numeric(stan_data$L),
+#                 "N"=as.numeric(stan_data$N),
+#                 "X"=as.numeric(stan_data$X),
+#                 "kCO2"=as.numeric(stan_data$kCO2),
+#                 "kNPQ"=as.numeric(stan_data$kNPQ),
+#                 "astar"=as.numeric(stan_data$astar),
+#                 "jSGm"=as.numeric(stan_data$jSGm),
+#                 "jCPm"=as.numeric(stan_data$jCPm),
+#                 "kROS"=as.numeric(stan_data$kROS),
+#                 "b"=as.numeric(stan_data$b)),
+#                 chains=4, iter=2000, cores=4, refresh=100)
 ```
