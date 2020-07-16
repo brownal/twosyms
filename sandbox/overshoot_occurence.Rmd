@@ -1,0 +1,297 @@
+---
+title: "Investigating how tolerant symbiont parameters affect rescue"
+author: "Ross Cunning and Alexandra Brown"
+date: "5/6/2020"
+output:
+      html_document:
+            code_fold: hide
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+library("factoextra")
+library("e1071")
+library("coda")
+library("rstan")
+options(mc.cores = 8)
+library("bayesplot")
+library("ggplot2")
+library("gridExtra")
+library("adegenet")
+options(repr.plot.res=240)
+```
+## A function for detecting when the host growth rate changes sign
+
+```{r, cache = TRUE}
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    changelist <- ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+    if (length(changelist) > 0) {
+          return(changelist[length(changelist)])
+   }
+   return(NA)
+}
+```
+
+```{r, cache = TRUE}
+# one-symbiont parameters
+pars1 <- def_pars(nsym=1)
+pars1$initS <- 1e-4
+
+# run simulations for 3000 days
+time<-seq(1, 100, 0.1)
+
+# draw sets of parameter values randomly
+# hopefully this will speed things up compared to looking over a grid
+
+draws = 10000; # number of sets of random parameter combinations to look over
+
+search_params <- data.frame(
+                            # Environmental parameters
+                            "L" = runif(draws, 0, 40),       # Light, choose values between 0 and 40
+                            "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
+                            "X" = runif(draws, 0, 4e-7),     # Food, choose values between 0 and 4e-7
+                            # Host parameter
+                            "kCO2" = runif(draws, 10, 50),   # Host carbon concentrating, choose values between 10 and 50
+                            # Tolerant symbiont parameters
+                            "kNPQ" = runif(draws, 112, 224), # Non-photochemical quenching, choose values between 112 and 124
+                            "astar" = runif(draws, 0.67, 1.34), # astar, choose values between 0.7 and 1.34
+                            "jSGm" = runif(draws, 0.15, 0.25), # Maximum growth rate, choose values between 0.15 and 0.25
+                            "jCPm" = runif(draws, 1, 2.8), # Maximum photosynthetic rate, choose values between 1 and 2.8
+                            "kROS" = runif(draws, 80, 250), # kROS, choose values between 80 and 250
+                            "b" = runif(draws, 1, 5))   # b, choose values between 1 and 5
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # simulate dynamics with just the sensitive symbiont
+    run_1symb <- coRal::run_coral(time=time, env=env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
+
+    # initialize rescue; will be TRUE if the tolerant symbiont rescued the sensitive
+    rescue <- FALSE
+
+    # initialize reason; will give the reason for lack of rescue if rescue does not occur
+    # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+    # reason = "T_dies" -> tolerant symbiont unable to rescue host
+    # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+    # reason = "rescue" -> rescue occurred
+    reason <- NA
+    rescue_time <- NA
+    max_SH <- NA
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "S_lives"
+          rescue_time <- detect_gr_change(run_1symb)
+          max_SH <- max(run_1symb$S/run_1symb$H)
+    }
+
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+         # two-symbiont parameters
+         pars2 <- coRal::def_pars(nsym=2)
+         pars2$kCO2 <- search_params[i, "kCO2"]
+         pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+         pars2$astar[2] <- search_params[i, "astar"]
+         pars2$kNPQ[2] <- search_params[i, "kNPQ"]
+         pars2$jSGm[2] <- search_params[i, "jSGm"]
+         pars2$jCPm[2] <- search_params[i, "jCPm"]
+         pars2$kROS[2] <- search_params[i, "kROS"]
+         pars2$b[2] <- search_params[i, "b"]
+
+
+
+        run_2symb <- coRal::run_coral(time=time, env=env, pars=pars2)
+        max_SH <- max((run_2symb$S.1 + run_2symb$S.2)/run_2symb$H)
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "T_dies" in case this is the case (we'll change it later if it isn't)
+        reason <- "T_dies"
+        rescue_time <- NA
+
+
+        # if the tolerant symbiont rescues the sensitive symbiont, we want to record how long that takes to happen
+        # if that doesn't happen, we'll record the time to rescue as NA
+
+
+        # only further investigate the case where host growth is positive at the end of the simulation
+
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+            # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2)
+            # set reason to "T_dominates" for now because this is what must have happened if rescue did not occur
+            reason <- "T_dominates"
+            rescue_time <- detect_gr_change(run_2symb)
+
+            if (run_2symb$S.1[length(run_2symb$S.1)] > run_2symb$S.2[length(run_2symb$S.2)]) {
+
+                rescue <- TRUE
+                reason <- "rescue"
+
+                rescue_time <- detect_gr_change(run_2symb)
+            }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"],
+    "astar"=search_params[i, "astar"], "kNPQ"=search_params[i, "kNPQ"],
+    "jSGm"=search_params[i, "jSGm"], "jCPm"=search_params[i, "jCPm"],
+    "kROS"=search_params[i, "kROS"], "b"=search_params[i, "b"],
+    "rescue"=rescue, "reason"=reason, "rescue_time"=rescue_time,
+    "max_SH"=max_SH)
+}
+
+stopCluster(cl) # stop the cluster
+
+# print time this took
+print("Simulation took")
+print(proc.time() - start)
+
+# store results in dataframe
+rescue_tol_param <- data.frame(results, row.names=NULL)
+
+```
+
+```{r}
+hist(as.numeric(rescue_tol_param$max_SH))
+hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="rescue", "max_SH"]))
+hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="T_dominates", "max_SH"]))
+
+sum(rescue_tol_param$reason=="S_lives")
+sum(rescue_tol_param$reason=="rescue")
+sum(rescue_tol_param$reason=="T_dominates")
+sum(rescue_tol_param$reason=="T_dies")
+
+```
+
+```{r, cache=TRUE}
+T_dom_cases <- rescue_tol_param[rescue_tol_param$reason=="T_dominates",];
+
+time<-seq(1, 600, 0.1)
+tend <- length(time)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+#
+T_equil <- foreach(i=1:nrow(T_dom_cases), .combine='rbind', .packages='dplyr') %dopar% {
+      env <- coRal::init_env(time=time,
+            L=c(as.numeric(T_dom_cases[i, "L"]), as.numeric(T_dom_cases[i, "L"]), 0),
+                             N=c(as.numeric(T_dom_cases[i, "N"]), as.numeric(T_dom_cases[i, "N"]), 0),
+                             X=c(as.numeric(T_dom_cases[i, "X"]), as.numeric(T_dom_cases[i, "X"]), 0))
+
+      pars2 <- coRal::def_pars(nsym=2)
+      pars2$kCO2 <- as.numeric(T_dom_cases[i, "kCO2"])
+      pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+      pars2$astar[2] <- as.numeric(T_dom_cases[i, "astar"])
+      pars2$kNPQ[2] <- as.numeric(T_dom_cases[i, "kNPQ"])
+      pars2$jSGm[2] <- as.numeric(T_dom_cases[i, "jSGm"])
+      pars2$jCPm[2] <- as.numeric(T_dom_cases[i, "jCPm"])
+      pars2$kROS[2] <- as.numeric(T_dom_cases[i, "kROS"])
+      pars2$b[2] <- as.numeric(T_dom_cases[i, "b"])
+
+      run_2symb <- coRal::run_coral(time=time, env=env, pars=pars2)
+      max_SH <- max((run_2symb$S.1 + run_2symb$S.2)/run_2symb$H)
+      dSH <- ((run_2symb[tend, "S.1"] + run_2symb[tend, "S.2"])/run_2symb[tend, "H"] -
+            (run_2symb[tend-1, "S.1"] + run_2symb[tend-1, "S.2"])/run_2symb[tend-1, "H"])
+
+      list("L"=as.numeric(T_dom_cases[i, "L"]), "N"=as.numeric(T_dom_cases[i, "N"]),
+      "X"=as.numeric(T_dom_cases[i, "X"]), "kCO2"=as.numeric(T_dom_cases[i, "kCO2"]),
+      "astar"=as.numeric(T_dom_cases[i, "astar"]), "kNPQ"=as.numeric(T_dom_cases[i, "kNPQ"]),
+      "jSGm"=as.numeric(T_dom_cases[i, "jSGm"]), "jCPm"=as.numeric(T_dom_cases[i, "jCPm"]),
+      "kROS"=as.numeric(T_dom_cases[i, "kROS"]), "b"=as.numeric(T_dom_cases[i, "b"]),
+      "max_SH"=max_SH, "dSH"=dSH)
+
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+T_equil <- data.frame(T_equil, row.names=NULL)
+
+```
+
+```{r}
+hist(as.numeric(T_equil$max_SH))
+hist(as.numeric(T_equil$dSH))
+
+plot(as.numeric(T_equil$max_SH), as.numeric(T_equil$dSH))
+
+```
+
+```{r}
+T_low_SH <- T_equil[as.numeric(T_equil$max_SH) == min(as.numeric(T_equil$max_SH)),]
+T_high_SH <- T_equil[as.numeric(T_equil$max_SH) == max(as.numeric(T_equil$max_SH)),]
+
+print(T_low_SH)
+print(T_high_SH)
+
+env_T_low_SH <- env <- coRal::init_env(time=time,
+                       L=c(as.numeric(T_low_SH[1, "L"]), as.numeric(T_low_SH[1, "L"]), 0),
+                       N=c(as.numeric(T_low_SH[1, "N"]), as.numeric(T_low_SH[1, "N"]), 0),
+                       X=c(as.numeric(T_low_SH[1, "X"]), as.numeric(T_low_SH[1, "X"]), 0))
+
+env_T_high_SH <- env <- coRal::init_env(time=time,
+                       L=c(as.numeric(T_high_SH[1, "L"]), as.numeric(T_high_SH[1, "L"]), 0),
+                       N=c(as.numeric(T_high_SH[1, "N"]), as.numeric(T_high_SH[1, "N"]), 0),
+                       X=c(as.numeric(T_high_SH[1, "X"]), as.numeric(T_high_SH[1, "X"]), 0))
+
+
+pars_T_low_SH <- coRal::def_pars(nsym=2)
+pars_T_low_SH$kCO2 <- as.numeric(T_low_SH[1, "kCO2"])
+pars_T_low_SH$initS[1:2] <- c(0.5e-4, 0.5e-4)
+pars_T_low_SH$astar[2] <- as.numeric(T_low_SH[1, "astar"])
+pars_T_low_SH$kNPQ[2] <- as.numeric(T_low_SH[1, "kNPQ"])
+pars_T_low_SH$jSGm[2] <- as.numeric(T_low_SH[1, "jSGm"])
+pars_T_low_SH$jCPm[2] <- as.numeric(T_low_SH[1, "jCPm"])
+pars_T_low_SH$kROS[2] <- as.numeric(T_low_SH[1, "kROS"])
+pars_T_low_SH$b[2] <- as.numeric(T_low_SH[1, "b"])
+
+
+pars_T_high_SH <- coRal::def_pars(nsym=2)
+pars_T_high_SH$kCO2 <- as.numeric(T_high_SH[1, "kCO2"])
+pars_T_high_SH$initS[1:2] <- c(0.5e-4, 0.5e-4)
+pars_T_high_SH$astar[2] <- as.numeric(T_high_SH[1, "astar"])
+pars_T_high_SH$kNPQ[2] <- as.numeric(T_high_SH[1, "kNPQ"])
+pars_T_high_SH$jSGm[2] <- as.numeric(T_high_SH[1, "jSGm"])
+pars_T_high_SH$jCPm[2] <- as.numeric(T_high_SH[1, "jCPm"])
+pars_T_high_SH$kROS[2] <- as.numeric(T_high_SH[1, "kROS"])
+pars_T_high_SH$b[2] <- as.numeric(T_high_SH[1, "b"])
+
+run_T_low_SH <- coRal::run_coral(time=time, env=env_T_low_SH, pars=pars_T_low_SH)
+run_T_high_SH <- coRal::run_coral(time=time, env=env_T_high_SH, pars=pars_T_high_SH)
+
+plot(time, run_T_low_SH$dH.Hdt, type="l", ylim=c(-0.1, 0.2))
+lines(time, run_T_low_SH$S.1/run_T_low_SH$H, col='blue')
+lines(time, run_T_low_SH$S.2/run_T_low_SH$H, col='red')
+
+plot(time, run_T_high_SH$dH.Hdt, type="l", ylim=c(-0.1, 1.6))
+lines(time, run_T_high_SH$S.1/run_T_high_SH$H, col='blue')
+lines(time, run_T_high_SH$S.2/run_T_high_SH$H, col='red')
+```
