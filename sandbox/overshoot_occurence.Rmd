@@ -43,6 +43,10 @@ detect_gr_change <- function(run) {
 }
 ```
 
+# Simulations
+
+## Simulation 100 days of host-symbiont dynamics to categorize outcomes
+
 ```{r, cache = TRUE}
 # one-symbiont parameters
 pars1 <- def_pars(nsym=1)
@@ -179,18 +183,105 @@ rescue_tol_param <- data.frame(results, row.names=NULL)
 
 ```
 
-```{r}
-hist(as.numeric(rescue_tol_param$max_SH))
-hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="rescue", "max_SH"]))
-hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="T_dominates", "max_SH"]))
+## Run simulations where host recovers to positive growth for 600 days to find steady-state symbiont:host ratio
 
-sum(rescue_tol_param$reason=="S_lives")
-sum(rescue_tol_param$reason=="rescue")
-sum(rescue_tol_param$reason=="T_dominates")
-sum(rescue_tol_param$reason=="T_dies")
+### Cases where the sensitive symbiont dominates post-recovery (tolerant symbiont not required for recovery)
+
+```{r, cache=TRUE}
+S_lives_cases <- rescue_tol_param[rescue_tol_param$reason=="S_lives",];
+
+time<-seq(1, 600, 0.1)
+tend <- length(time)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+#
+S_equil <- foreach(i=1:nrow(S_lives_cases), .combine='rbind', .packages='dplyr') %dopar% {
+      env <- coRal::init_env(time=time,
+            L=c(as.numeric(S_lives_cases[i, "L"]), as.numeric(S_lives_cases[i, "L"]), 0),
+                             N=c(as.numeric(S_lives_cases[i, "N"]), as.numeric(S_lives_cases[i, "N"]), 0),
+                             X=c(as.numeric(S_lives_cases[i, "X"]), as.numeric(S_lives_cases[i, "X"]), 0))
+
+      pars2 <- coRal::def_pars(nsym=2)
+      pars2$kCO2 <- as.numeric(S_lives_cases[i, "kCO2"])
+      pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+      pars2$astar[2] <- as.numeric(S_lives_cases[i, "astar"])
+      pars2$kNPQ[2] <- as.numeric(S_lives_cases[i, "kNPQ"])
+      pars2$jSGm[2] <- as.numeric(S_lives_cases[i, "jSGm"])
+      pars2$jCPm[2] <- as.numeric(S_lives_cases[i, "jCPm"])
+      pars2$kROS[2] <- as.numeric(S_lives_cases[i, "kROS"])
+      pars2$b[2] <- as.numeric(S_lives_cases[i, "b"])
+
+      run_2symb <- coRal::run_coral(time=time, env=env, pars=pars2)
+      max_SH <- max((run_2symb$S.1 + run_2symb$S.2)/run_2symb$H)
+      dSH <- ((run_2symb[tend, "S.1"] + run_2symb[tend, "S.2"])/run_2symb[tend, "H"] -
+            (run_2symb[tend-1, "S.1"] + run_2symb[tend-1, "S.2"])/run_2symb[tend-1, "H"])
+
+      list("L"=as.numeric(S_lives_cases[i, "L"]), "N"=as.numeric(S_lives_cases[i, "N"]),
+      "X"=as.numeric(S_lives_cases[i, "X"]), "kCO2"=as.numeric(S_lives_cases[i, "kCO2"]),
+      "astar"=as.numeric(S_lives_cases[i, "astar"]), "kNPQ"=as.numeric(S_lives_cases[i, "kNPQ"]),
+      "jSGm"=as.numeric(S_lives_cases[i, "jSGm"]), "jCPm"=as.numeric(S_lives_cases[i, "jCPm"]),
+      "kROS"=as.numeric(S_lives_cases[i, "kROS"]), "b"=as.numeric(S_lives_cases[i, "b"]),
+      "max_SH"=max_SH, "dSH"=dSH)
+
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+S_equil <- data.frame(S_equil, row.names=NULL)
 
 ```
 
+### Cases where the sensitive symbiont dominates post-recovery (tolerant symbiont _required_ for recovery)
+
+```{r, cache=TRUE}
+rescue_cases <- rescue_tol_param[rescue_tol_param$reason=="rescue",];
+
+time<-seq(1, 600, 0.1)
+tend <- length(time)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+#
+R_equil <- foreach(i=1:nrow(rescue_cases), .combine='rbind', .packages='dplyr') %dopar% {
+      env <- coRal::init_env(time=time,
+            L=c(as.numeric(rescue_cases[i, "L"]), as.numeric(rescue_cases[i, "L"]), 0),
+                             N=c(as.numeric(rescue_cases[i, "N"]), as.numeric(rescue_cases[i, "N"]), 0),
+                             X=c(as.numeric(rescue_cases[i, "X"]), as.numeric(rescue_cases[i, "X"]), 0))
+
+      pars2 <- coRal::def_pars(nsym=2)
+      pars2$kCO2 <- as.numeric(rescue_cases[i, "kCO2"])
+      pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+      pars2$astar[2] <- as.numeric(rescue_cases[i, "astar"])
+      pars2$kNPQ[2] <- as.numeric(rescue_cases[i, "kNPQ"])
+      pars2$jSGm[2] <- as.numeric(rescue_cases[i, "jSGm"])
+      pars2$jCPm[2] <- as.numeric(rescue_cases[i, "jCPm"])
+      pars2$kROS[2] <- as.numeric(rescue_cases[i, "kROS"])
+      pars2$b[2] <- as.numeric(rescue_cases[i, "b"])
+
+      run_2symb <- coRal::run_coral(time=time, env=env, pars=pars2)
+      max_SH <- max((run_2symb$S.1 + run_2symb$S.2)/run_2symb$H)
+      dSH <- ((run_2symb[tend, "S.1"] + run_2symb[tend, "S.2"])/run_2symb[tend, "H"] -
+            (run_2symb[tend-1, "S.1"] + run_2symb[tend-1, "S.2"])/run_2symb[tend-1, "H"])
+
+      list("L"=as.numeric(rescue_cases[i, "L"]), "N"=as.numeric(rescue_cases[i, "N"]),
+      "X"=as.numeric(rescue_cases[i, "X"]), "kCO2"=as.numeric(rescue_cases[i, "kCO2"]),
+      "astar"=as.numeric(rescue_cases[i, "astar"]), "kNPQ"=as.numeric(rescue_cases[i, "kNPQ"]),
+      "jSGm"=as.numeric(rescue_cases[i, "jSGm"]), "jCPm"=as.numeric(rescue_cases[i, "jCPm"]),
+      "kROS"=as.numeric(rescue_cases[i, "kROS"]), "b"=as.numeric(rescue_cases[i, "b"]),
+      "max_SH"=max_SH, "dSH"=dSH)
+
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+R_equil <- data.frame(R_equil, row.names=NULL)
+
+```
+
+### Cases where the tolerant symbiont dominates post-recovery
 ```{r, cache=TRUE}
 T_dom_cases <- rescue_tol_param[rescue_tol_param$reason=="T_dominates",];
 
@@ -237,20 +328,76 @@ T_equil <- data.frame(T_equil, row.names=NULL)
 
 ```
 
-```{r}
-hist(as.numeric(T_equil$max_SH))
-hist(as.numeric(T_equil$dSH))
+# Summary statistics and plots
 
-plot(as.numeric(T_equil$max_SH), as.numeric(T_equil$dSH))
+## What percent of simulations fell into each outcome category?
+
+```{r}
+print(paste0(
+      "Recovers w/ sensitive symb. alone:                          ",
+            100 * sum(rescue_tol_param$reason=="S_lives")/nrow(rescue_tol_param),
+            "% of cases\n",
+      "Recovers w/ sensitive symb. when tolerant symb. is present: ",
+            100 * sum(rescue_tol_param$reason=="rescue")/nrow(rescue_tol_param),
+            "% of cases\n",
+      "Recovers w/ tolerant symb.:                                 ",
+            100 * sum(rescue_tol_param$reason=="T_dominates")/nrow(rescue_tol_param),
+            "% of cases\n",
+      "Does not recover:                                           ",
+            100 * sum(rescue_tol_param$reason=="T_dies")/nrow(rescue_tol_param),
+            "% of cases\n"))
 
 ```
 
+## What was the maximum S:H host ratio reached in the first 100 days (maximum potential overshoot)?
+```{r}
+par(mfrow=c(3,2))
+hist(as.numeric(rescue_tol_param$max_SH), main="All outcomes", xlab="Maximum symbiont:host ratio (first 100 days)", ylab="Number of simulations")
+
+hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="S_lives", "max_SH"]),
+      main="Recovers w/ sensitive symb. alone", xlab="Maximum symbiont:host ratio (first 100 days)", ylab="Number of simulations")
+hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="rescue", "max_SH"]),
+      main="Recovers w/ sensitive symb. when tolerant symb. is present", xlab="Maximum symbiont:host ratio (first 100 days)", ylab="Number of simulations")
+hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="T_dominates", "max_SH"]),
+      main="Recovers w/ tolerant symb.", xlab="Maximum symbiont:host ratio (first 100 days)", ylab="Number of simulations")
+hist(as.numeric(rescue_tol_param[rescue_tol_param$reason=="T_dies", "max_SH"]),
+      main="Does not recover", xlab="Maximum symbiont:host ratio (first 100 days)", ylab="Number of simulations")
+```
+
+## When the host recovers, what is the maximum S:H ratio ever reached (accounts for overshoot at equilibrating at a high S:H ratio)?
+Using simulation results from the first 600 days, assuming things have equilibrated by then (this will be checked below).
+
+```{r}
+par(mfrow=c(2, 2))
+hist(c(as.numeric(S_equil$max_SH), as.numeric(R_equil$max_SH), as.numeric(T_equil$max_SH)),
+       main="All recovery outcomes", xlab="Maximum symbiont:host ratio (first 600 days)", ylab="Number of simulations")
+hist(as.numeric(S_equil$max_SH),
+       main="Recovers w/ sensitive symb. alone", xlab="Maximum symbiont:host ratio (first 600 days)", ylab="Number of simulations")
+hist(as.numeric(R_equil$max_SH),
+      main="Recovers w/ sensitive symb.\nwhen tolerant symb. is present", xlab="Maximum symbiont:host ratio (first 600 days)", ylab="Number of simulations")
+hist(as.numeric(T_equil$max_SH),
+      main="Recovers w/ tolerant symb.", xlab="Maximum symbiont:host ratio (first 600 days)", ylab="Number of simulations")
+```
+
+## Check that 600 days is long enough for the S:H ratio to equilibrate
+
+```{r}
+par(mfrow=c(2,2))
+hist(c(as.numeric(S_equil$dSH), as.numeric(R_equil$dSH), as.numeric(T_equil$dSH)),
+       main="Change in S:H ratio at end of 600-day simulation", xlab="Change in S:H ratio between time 599.9 and 600", ylab="Number of simulations")
+plot(c(as.numeric(S_equil$max_SH), as.numeric(R_equil$max_SH), as.numeric(T_equil$max_SH)),
+      c(as.numeric(S_equil$dSH), as.numeric(R_equil$dSH), as.numeric(T_equil$dSH)),
+      main="Is change in S:H ratio at end of simulation\ncorrelated with max S:H ratio?",
+      ylab="Change in S:H ratio at end of simulation", xlab="Max SH ratio")
+```
+
+
+## Examples of cases with high and low maximum SH ratios
+
+### Tolerant symbiont dominates
 ```{r}
 T_low_SH <- T_equil[as.numeric(T_equil$max_SH) == min(as.numeric(T_equil$max_SH)),]
 T_high_SH <- T_equil[as.numeric(T_equil$max_SH) == max(as.numeric(T_equil$max_SH)),]
-
-print(T_low_SH)
-print(T_high_SH)
 
 env_T_low_SH <- env <- coRal::init_env(time=time,
                        L=c(as.numeric(T_low_SH[1, "L"]), as.numeric(T_low_SH[1, "L"]), 0),
@@ -287,11 +434,18 @@ pars_T_high_SH$b[2] <- as.numeric(T_high_SH[1, "b"])
 run_T_low_SH <- coRal::run_coral(time=time, env=env_T_low_SH, pars=pars_T_low_SH)
 run_T_high_SH <- coRal::run_coral(time=time, env=env_T_high_SH, pars=pars_T_high_SH)
 
-plot(time, run_T_low_SH$dH.Hdt, type="l", ylim=c(-0.1, 0.2))
+par(mfrow=c(2,1))
+plot(time, run_T_low_SH$dH.Hdt, type="l", ylim=c(-0.1, 0.2),
+      main="Lowest maximum S:H ratio",
+      xlab="time")
 lines(time, run_T_low_SH$S.1/run_T_low_SH$H, col='blue')
 lines(time, run_T_low_SH$S.2/run_T_low_SH$H, col='red')
+legend("topleft", c("Host growth rate", "Sensitive symb:host ratio", "Tolerant symb:host ratio"), col=c("black", "blue", "red"), pch=19)
 
-plot(time, run_T_high_SH$dH.Hdt, type="l", ylim=c(-0.1, 1.6))
+plot(time, run_T_high_SH$dH.Hdt, type="l", ylim=c(-0.1, 1.6),
+      main="Highest maximum S:H ratio",
+      xlab="time")
 lines(time, run_T_high_SH$S.1/run_T_high_SH$H, col='blue')
 lines(time, run_T_high_SH$S.2/run_T_high_SH$H, col='red')
+legend("topleft", c("Host growth rate", "Sensitive symb:host ratio", "Tolerant symb:host ratio"), col=c("black", "blue", "red"), pch=19)
 ```
