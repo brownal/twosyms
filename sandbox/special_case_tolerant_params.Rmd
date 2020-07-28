@@ -11,7 +11,7 @@ output:
 #Set kintr options
 knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8)
 
-library(coRal)
+#library(coRal) # commented out to make sure I don't overwrite my changes to run_coral
 library(foreach)
 library(parallel)
 library(doParallel)
@@ -31,7 +31,7 @@ options(repr.plot.res=240)
 ```
 ## A function for detecting when the host growth rate changes sign
 
-```{r, cache = TRUE}
+```{r}
 detect_gr_change <- function(run) {
     prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
     currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
@@ -43,13 +43,17 @@ detect_gr_change <- function(run) {
 }
 ```
 
-```{r, cache = TRUE}
+# On 7/23/2020 I'm running this with the equation for rhoN changed to include 1/yC.
+(Did this with the trace function. Had to call it outside of this document.)
+
+```{r}
+run_coral
 # one-symbiont parameters
 pars1 <- def_pars(nsym=1)
 pars1$initS <- 1e-4
 
 # run simulations for 3000 days
-time<-seq(1, 3000, 0.1)
+time<-seq(1, 100, 0.1)
 
 # draw sets of parameter values randomly
 # hopefully this will speed things up compared to looking over a grid
@@ -516,7 +520,7 @@ legend("topright", c("Recovers w/ T", "No recovery", "Recovers w/ S in \npresenc
 
 ```
 
-```{r, cache=TRUE}
+```{r}
 # results_stan <- lapply(rescue_tol_param$reason,
 #       function(r) {
 #             if(r=="S_lives") {
@@ -585,7 +589,7 @@ legend("topright", c("Recovers w/ T", "No recovery", "Recovers w/ S in \npresenc
 # What environmental, host, and tolerant symbiont traits affect time to recovery?
 For the case where S. lives but only when T. is also present (the "rescue" case)
 
-```{r, cache=TRUE, results=FALSE, message=FALSE}
+```{r}
 
 dapc_grp <- unlist(rescue_tol_param$reason)
 
@@ -609,18 +613,18 @@ data_2symb$outcome <- dapc_grp
 data_2symb$outcome <- revalue(data_2symb$outcome, c("S_lives"="recovers_S", "T_dominates"="recovers_T", "T_dies"="no_recovery", "rescue"="recovers_rescue"))
 save(data_2symb, file="data_2symb.Rda")
 #
-# my_dapc <- dapc(dapc_x, dapc_grp)
+ my_dapc <- dapc(dapc_x, dapc_grp, n.pca=8, n.da=4)
 
 ```
 
 
 ```{r}
 
-# print(my_dapc)
-#
-# summary(my_dapc)
-#
-# scatter(my_dapc)
+#print(my_dapc)
+
+summary(my_dapc)
+
+#scatter(my_dapc)
 
 #stan_data <- rescue_tol_param[rescue_tol_param$rescue==TRUE,];
 

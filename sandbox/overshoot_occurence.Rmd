@@ -11,7 +11,7 @@ output:
 #Set kintr options
 knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8)
 
-library(coRal)
+#library(coRal)
 library(foreach)
 library(parallel)
 library(doParallel)
@@ -31,7 +31,7 @@ options(repr.plot.res=240)
 ```
 ## A function for detecting when the host growth rate changes sign
 
-```{r, cache = TRUE}
+```{r}
 detect_gr_change <- function(run) {
     prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
     currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
@@ -44,10 +44,12 @@ detect_gr_change <- function(run) {
 ```
 
 # Simulations
+Redone with yC^-1 in rhoN on 7/23/2020
 
 ## Simulation 100 days of host-symbiont dynamics to categorize outcomes
 
-```{r, cache = TRUE}
+```{r}
+body(run_coral)
 # one-symbiont parameters
 pars1 <- def_pars(nsym=1)
 pars1$initS <- 1e-4
@@ -187,7 +189,8 @@ rescue_tol_param <- data.frame(results, row.names=NULL)
 
 ### Cases where the sensitive symbiont dominates post-recovery (tolerant symbiont not required for recovery)
 
-```{r, cache=TRUE}
+```{r}
+body(run_coral)
 S_lives_cases <- rescue_tol_param[rescue_tol_param$reason=="S_lives",];
 
 time<-seq(1, 600, 0.1)
@@ -235,7 +238,8 @@ S_equil <- data.frame(S_equil, row.names=NULL)
 
 ### Cases where the sensitive symbiont dominates post-recovery (tolerant symbiont _required_ for recovery)
 
-```{r, cache=TRUE}
+```{r}
+body(run_coral)
 rescue_cases <- rescue_tol_param[rescue_tol_param$reason=="rescue",];
 
 time<-seq(1, 600, 0.1)
@@ -282,7 +286,8 @@ R_equil <- data.frame(R_equil, row.names=NULL)
 ```
 
 ### Cases where the tolerant symbiont dominates post-recovery
-```{r, cache=TRUE}
+```{r}
+body(run_coral)
 T_dom_cases <- rescue_tol_param[rescue_tol_param$reason=="T_dominates",];
 
 time<-seq(1, 600, 0.1)
