@@ -61,7 +61,9 @@ pars_both$initS[1:2] <- c(0.05, 0.05)
 ```
 
 # Simulate healthy corals with sensitive and tolerant symbionts alone and together
+
 The goal is to find out
+
 1. Under which conditions can the symbionts survive (separately or together)?
 2. When both symbionts are present, which one dominates the host?
 
@@ -465,21 +467,545 @@ legend("top", legend=paste0(paste(round(seq(0, 10/11*100, length.out=10),0), rou
 
 ```
 
-## 1d. Do hosts ever survive with one symbiont but not the other?
-### 1di. Sensitive but not tolerant (% of simulations)
+### 1d. Do hosts ever survive with one symbiont but not the other?
+#### 1di. Sensitive but not tolerant (% of simulations)
 
 ```{r}
 print(paste0(round(sum(healthy_sims$survival_sen & !(healthy_sims$survival_tol))/nrow(healthy_sims) * 100, 2), "%"))
 ```
 
-### 1dii. Tolerant but not sensitive (% of simulations)
+#### 1dii. Tolerant but not sensitive (% of simulations)
 
 ```{r}
 print(paste0(round(sum(!(healthy_sims$survival_sen) & (healthy_sims$survival_tol))/nrow(healthy_sims) * 100, 2), "%"))
 ```
 
-### 1diii. Both together, but not singly (% of simulations)
+#### 1diii. Both together, but not singly (% of simulations)
 
 ```{r}
 print(paste0(round(sum(healthy_sims$survival_both & (!(healthy_sims$survival_tol) & !(healthy_sims$survival_sen)))/nrow(healthy_sims) * 100, 2), "%"))
+```
+
+#### 1div. Either (or both) singly, but not together (% of simulations)
+
+```{r}
+print(paste0(round(sum(!(healthy_sims$survival_both) & (healthy_sims$survival_tol | healthy_sims$survival_sen))/nrow(healthy_sims) * 100, 2), "%"))
+```
+
+#### 1dv. Both singly, but not together (% of simulations)
+
+```{r}
+print(paste0(round(sum(!(healthy_sims$survival_both) & (healthy_sims$survival_tol & healthy_sims$survival_sen))/nrow(healthy_sims) * 100, 2), "%"))
+```
+
+### 1e. Plots comparing regions of survival
+
+#### 1ei. Sensitive survives but tolerant does not
+
+```{r}
+
+# Set up the matrices that will be plotted
+plot_L_N <- matrix(0, nrow=length(unique(healthy_sims$N)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$N), unique(healthy_sims$L)))
+
+plot_L_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$L)))
+
+plot_L_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$L)))
+
+plot_N_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$N)))
+
+plot_N_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$N)))
+
+plot_X_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$X)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$X)))
+
+
+# For each combination of environmental/host parameters, find the fraction of simulations that resulted in host survival            
+for (i in 1:length(unique(healthy_sims$N))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_N[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"]))
+
+                  if (plot_L_N[[i, j]] == 0) {
+                        plot_L_N[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"]))
+
+                  if (plot_L_X[[i, j]] == 0) {
+                        plot_L_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"]))
+
+                  if (plot_L_kCO2[[i, j]] == 0) {
+                        plot_L_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"]))
+
+                  if (plot_N_X[[i, j]] == 0) {
+                        plot_N_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"]))
+
+                  if (plot_N_kCO2[[i, j]] == 0) {
+                        plot_N_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$X))) {
+            plot_X_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_tol"]))
+
+            if (plot_X_kCO2[[i, j]] == 0) {
+                  plot_X_kCO2[[i, j]] <- NA
+            }
+      }
+}
+
+
+# Make the plots
+par(mfrow=c(3, 3))
+plot(plot_L_N[nrow(plot_L_N_survival_both):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ S but not T \n Light vs nitrogen",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_X[nrow(plot_L_X_survival_tol):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ S but not T \n Light vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_kCO2[nrow(plot_L_kCO2_survival_tol):1,],
+      xlab="Light", ylab="kCO2", main="Host survives w/ S but not T \n Light vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+plot(plot_N_X[nrow(plot_N_X_survival_tol):1,],
+      xlab="Nitrogen", ylab="Food", main="Host survives w/ S but not T \n Nitrogen vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_N_kCO2[nrow(plot_N_kCO2_survival_tol):1,],
+      xlab="Nitrogen", ylab="kCO2", main="Host survives w/ S but not T \n Nitrogen vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_X_kCO2[nrow(plot_X_kCO2_survival_tol):1,],
+      xlab="Food", ylab="kCO2", main="Host survives w/ S but not T \n Food vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+# Legend
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="Percent of simulations\nwhere host survives w/ S but not T")
+legend("top", legend=c("0%", paste0(paste(round(seq(0, 10/11*100, length.out=10),0), round(seq(1/11*100, 100, length.out=10),0), sep=" to "), "%")),
+       fill=c("grey", viridis(10)), cex=1, ncol=2)
+
+```
+
+#### 1eii. Tolerant survives but sensitive does not
+
+```{r}
+
+# Set up the matrices that will be plotted
+plot_L_N <- matrix(0, nrow=length(unique(healthy_sims$N)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$N), unique(healthy_sims$L)))
+
+plot_L_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$L)))
+
+plot_L_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$L)))
+
+plot_N_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$N)))
+
+plot_N_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$N)))
+
+plot_X_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$X)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$X)))
+
+
+# For each combination of environmental/host parameters, find the fraction of simulations that resulted in host survival            
+for (i in 1:length(unique(healthy_sims$N))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_N[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"]))
+
+                  if (plot_L_N[[i, j]] == 0) {
+                        plot_L_N[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"]))
+
+                  if (plot_L_X[[i, j]] == 0) {
+                        plot_L_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"]))
+
+                  if (plot_L_kCO2[[i, j]] == 0) {
+                        plot_L_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"]))
+
+                  if (plot_N_X[[i, j]] == 0) {
+                        plot_N_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"]))
+
+                  if (plot_N_kCO2[[i, j]] == 0) {
+                        plot_N_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$X))) {
+            plot_X_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_sen"]))
+
+            if (plot_X_kCO2[[i, j]] == 0) {
+                  plot_X_kCO2[[i, j]] <- NA
+            }
+      }
+}
+
+
+# Make the plots
+par(mfrow=c(3, 3))
+plot(plot_L_N[nrow(plot_L_N_survival_both):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ T but not S \n Light vs nitrogen",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_X[nrow(plot_L_X_survival_tol):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ T but not S \n Light vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_kCO2[nrow(plot_L_kCO2_survival_tol):1,],
+      xlab="Light", ylab="kCO2", main="Host survives w/ T but not S \n Light vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+plot(plot_N_X[nrow(plot_N_X_survival_tol):1,],
+      xlab="Nitrogen", ylab="Food", main="Host survives w/ T but not S \n Nitrogen vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_N_kCO2[nrow(plot_N_kCO2_survival_tol):1,],
+      xlab="Nitrogen", ylab="kCO2", main="Host survives w/ T but not S \n Nitrogen vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_X_kCO2[nrow(plot_X_kCO2_survival_tol):1,],
+      xlab="Food", ylab="kCO2", main="Host survives w/ T but not S \n Food vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+# Legend
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="Percent of simulations\nwhere host survives w/ T but not S")
+legend("top", legend=c("0%", paste0(paste(round(seq(0, 10/11*100, length.out=10),0), round(seq(1/11*100, 100, length.out=10),0), sep=" to "), "%")),
+       fill=c("grey", viridis(10)), cex=1, ncol=2)
+
+```
+
+
+#### 1eii. Sensitive survives on its own but both symbs together do not
+
+```{r}
+
+# Set up the matrices that will be plotted
+plot_L_N <- matrix(0, nrow=length(unique(healthy_sims$N)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$N), unique(healthy_sims$L)))
+
+plot_L_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$L)))
+
+plot_L_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$L)))
+
+plot_N_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$N)))
+
+plot_N_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$N)))
+
+plot_X_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$X)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$X)))
+
+
+# For each combination of environmental/host parameters, find the fraction of simulations that resulted in host survival            
+for (i in 1:length(unique(healthy_sims$N))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_N[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"]))
+
+                  if (plot_L_N[[i, j]] == 0) {
+                        plot_L_N[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"]))
+
+                  if (plot_L_X[[i, j]] == 0) {
+                        plot_L_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"]))
+
+                  if (plot_L_kCO2[[i, j]] == 0) {
+                        plot_L_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_both"]))
+
+                  if (plot_N_X[[i, j]] == 0) {
+                        plot_N_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_both"]))
+
+                  if (plot_N_kCO2[[i, j]] == 0) {
+                        plot_N_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$X))) {
+            plot_X_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_sen"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_both"]))
+
+            if (plot_X_kCO2[[i, j]] == 0) {
+                  plot_X_kCO2[[i, j]] <- NA
+            }
+      }
+}
+
+
+# Make the plots
+par(mfrow=c(3, 3))
+plot(plot_L_N[nrow(plot_L_N_survival_both):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ S but not both \n Light vs nitrogen",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_X[nrow(plot_L_X_survival_tol):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ S but not both \n Light vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_kCO2[nrow(plot_L_kCO2_survival_tol):1,],
+      xlab="Light", ylab="kCO2", main="Host survives w/ S but not both \n Light vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+plot(plot_N_X[nrow(plot_N_X_survival_tol):1,],
+      xlab="Nitrogen", ylab="Food", main="Host survives w/ S but not both \n Nitrogen vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_N_kCO2[nrow(plot_N_kCO2_survival_tol):1,],
+      xlab="Nitrogen", ylab="kCO2", main="Host survives w/ S but not both \n Nitrogen vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_X_kCO2[nrow(plot_X_kCO2_survival_tol):1,],
+      xlab="Food", ylab="kCO2", main="Host survives w/ S but not both \n Food vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+# Legend
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="Percent of simulations\nwhere host survives w/ S but not both")
+legend("top", legend=c("0%", paste0(paste(round(seq(0, 10/11*100, length.out=10),0), round(seq(1/11*100, 100, length.out=10),0), sep=" to "), "%")),
+       fill=c("grey", viridis(10)), cex=1, ncol=2)
+
+```
+
+
+#### 1eii. Tolerant survives on its own but both symbs together do not
+
+```{r}
+
+# Set up the matrices that will be plotted
+plot_L_N <- matrix(0, nrow=length(unique(healthy_sims$N)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$N), unique(healthy_sims$L)))
+
+plot_L_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$L)))
+
+plot_L_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$L)))
+
+plot_N_X <- matrix(0, nrow=length(unique(healthy_sims$X)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$X), unique(healthy_sims$N)))
+
+plot_N_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$N)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$N)))
+
+plot_X_kCO2 <- matrix(0, nrow=length(unique(healthy_sims$kCO2)), ncol=length(unique(healthy_sims$X)),
+      dimnames=list(unique(healthy_sims$kCO2), unique(healthy_sims$X)))
+
+
+# For each combination of environmental/host parameters, find the fraction of simulations that resulted in host survival            
+for (i in 1:length(unique(healthy_sims$N))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_N[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"]))
+
+                  if (plot_L_N[[i, j]] == 0) {
+                        plot_L_N[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"]))
+
+                  if (plot_L_X[[i, j]] == 0) {
+                        plot_L_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"]))
+
+                  if (plot_L_kCO2[[i, j]] == 0) {
+                        plot_L_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$X))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_X[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$X == unique(healthy_sims$X)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_both"]))
+
+                  if (plot_N_X[[i, j]] == 0) {
+                        plot_N_X[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_both"]))
+
+                  if (plot_N_kCO2[[i, j]] == 0) {
+                        plot_N_kCO2[[i, j]] <- NA
+                  }
+      }
+}
+
+for (i in 1:length(unique(healthy_sims$kCO2))) {
+      for (j in 1:length(unique(healthy_sims$X))) {
+            plot_X_kCO2[[i, j]] <-
+                  mean(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_tol"] &
+                        !(healthy_sims[(healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_both"]))
+
+            if (plot_X_kCO2[[i, j]] == 0) {
+                  plot_X_kCO2[[i, j]] <- NA
+            }
+      }
+}
+
+
+# Make the plots
+par(mfrow=c(3, 3))
+plot(plot_L_N[nrow(plot_L_N_survival_both):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ T but not both \n Light vs nitrogen",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_X[nrow(plot_L_X_survival_tol):1,],
+      xlab="Light", ylab="Nitrogen", main="Host survives w/ T but not both \n Light vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_L_kCO2[nrow(plot_L_kCO2_survival_tol):1,],
+      xlab="Light", ylab="kCO2", main="Host survives w/ T but not both \n Light vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+plot(plot_N_X[nrow(plot_N_X_survival_tol):1,],
+      xlab="Nitrogen", ylab="Food", main="Host survives w/ T but not both \n Nitrogen vs food",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_N_kCO2[nrow(plot_N_kCO2_survival_tol):1,],
+      xlab="Nitrogen", ylab="kCO2", main="Host survives w/ T but not both \n Nitrogen vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+plot(plot_X_kCO2[nrow(plot_X_kCO2_survival_tol):1,],
+      xlab="Food", ylab="kCO2", main="Host survives w/ T but not both \n Food vs kCO2",
+      breaks=seq(0, 1, length.out=11), col=viridis(10), na.col="grey", key=NULL)
+
+# Legend
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="Percent of simulations\nwhere host survives w/ T but not both")
+legend("top", legend=c("0%", paste0(paste(round(seq(0, 10/11*100, length.out=10),0), round(seq(1/11*100, 100, length.out=10),0), sep=" to "), "%")),
+       fill=c("grey", viridis(10)), cex=1, ncol=2)
+
 ```
