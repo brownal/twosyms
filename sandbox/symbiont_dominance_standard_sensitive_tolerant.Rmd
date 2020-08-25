@@ -1145,7 +1145,7 @@ legend("top", legend=c("0%", paste0(paste(round(seq(0, 10/11*100, length.out=10)
 
 ### 1f. Time series of cases where both symbionts allow host survival alone, but not together
 
-```{r}
+```{r, cache=TRUE}
 
 selected_sims <- healthy_sims[!(healthy_sims$survival_both) & (healthy_sims$survival_tol & healthy_sims$survival_sen), ]
 par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
@@ -1205,7 +1205,7 @@ legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio")
 
 ```
 
-```{r}
+```{r, cache=TRUE}
 selected_sims <- healthy_sims[!(healthy_sims$survival_both) & (healthy_sims$survival_tol & healthy_sims$survival_sen), ]
 par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
 
@@ -1263,7 +1263,7 @@ plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
 legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio"), col=c("blue", "red"), pch=19)
 ```
 
-```{r}
+```{r, cache=TRUE}
 selected_sims <- healthy_sims[!(healthy_sims$survival_both) & (healthy_sims$survival_tol & healthy_sims$survival_sen), ]
 par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
 
@@ -1322,7 +1322,7 @@ legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio")
 ```
 
 
-```{r}
+```{r, cache=TRUE}
 selected_sims <- healthy_sims[!(healthy_sims$survival_both) & (healthy_sims$survival_tol & healthy_sims$survival_sen), ]
 par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
 
@@ -1487,5 +1487,355 @@ increased_sh_sims <- transform(increased_sh_sims,
 #### 1gi. Do hosts with all symbionts now survive?
 
 ```{r}
-sum(increased_sh_sims$survival_sen & increased_sh_sims$survival_tol & increased_sh_sims$survival_both)
+sum(increased_sh_sims$survival_sen & increased_sh_sims$survival_tol & increased_sh_sims$survival_both) == nrow(increased_sh_sims)
+```
+
+
+
+### 1h. Do hosts with a single symbiont survive when the initial symbiont:host ratio is 0.05?
+```{r, cache=TRUE}
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+selected_sims <- healthy_sims[!(healthy_sims$survival_both) & (healthy_sims$survival_tol & healthy_sims$survival_sen), ]
+
+decreased_sh <- foreach(i=1:nrow(selected_sims), .combine='rbind', .packages='dplyr') %dopar% {
+      sim_i <- selected_sims[i,]
+      env_i <- coRal::init_env(time=time,
+            L=c(as.numeric(sim_i[1, "L"]), as.numeric(sim_i[1, "L"]), 0),
+            N=c(as.numeric(sim_i[1, "N"]), as.numeric(sim_i[1, "N"]), 0),
+            X=c(as.numeric(sim_i[1, "X"]), as.numeric(sim_i[1, "X"]), 0))
+
+      s_pars_i <- coRal::def_pars(nsym=1)
+      s_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      s_pars_i$initS <- 0.05
+
+      t_pars_i <- coRal::def_pars(nsym=1)
+      t_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      t_pars_i$jCPm <- 1.0
+      t_pars_i$kROS <- 250
+      t_pars_i$jSGm <- 0.15
+      t_pars_i$initS <- 0.05
+
+      both_pars_i <- coRal::def_pars(nsym=2)
+      both_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      both_pars_i$jCPm[2] <- 1.0
+      both_pars_i$kROS[2] <- 250
+      both_pars_i$jSGm[2] <- 0.15
+      both_pars_i$initS <- c(0.025, 0.025)
+
+      run_sen <- coRal::run_coral(time=time, env=env_i, pars=s_pars_i)
+      run_tol <- coRal::run_coral(time=time, env=env_i, pars=t_pars_i)
+      run_both <- coRal::run_coral(time=time, env=env_i, pars=both_pars_i)
+
+
+
+      # 1. Convergence: have the host and symbiont growth rates stabilized? (Changed by no more than 10^-6 between the last and penultimate time steps)
+      # 1a. Simulation with sensitive symbiont alone
+      converge_sen_H <- (abs(run_sen$dH.Hdt[length(time)] - run_sen$dH.Hdt[length(time)-1]) <= 1e-6)
+      converge_sen_S <- (abs(run_sen$dS.Sdt[length(time)] - run_sen$dS.Sdt[length(time)-1]) <= 1e-6)
+      converge_sen <- converge_sen_H & converge_sen_S
+
+      # 1b. Simulation with tolerant symbiont alone
+      converge_tol_H <- (abs(run_tol$dH.Hdt[length(time)] - run_tol$dH.Hdt[length(time)-1]) <= 1e-6)
+      converge_tol_S <- (abs(run_tol$dS.Sdt[length(time)] - run_tol$dS.Sdt[length(time)-1]) <= 1e-6)
+      converge_tol <- converge_tol_H & converge_tol_S
+
+      # 1c. Simulation with both symbionts
+      converge_both_H <- (abs(run_both$dH.Hdt[length(time)] - run_both$dH.Hdt[length(time)-1]) <= 1e-6)
+      converge_both_S1 <- (abs(run_both$dS.Sdt.1[length(time)] - run_both$dS.Sdt.1[length(time)-1]) <= 1e-6)
+      converge_both_S2 <- (abs(run_both$dS.Sdt.2[length(time)] - run_both$dS.Sdt.2[length(time)-1]) <= 1e-6)
+      converge_both <- converge_both_H & (converge_both_S1 & converge_both_S2)
+
+      # 2. Survival: does the coral have positive growth at the end of the simulation?
+      survival_sen <- run_sen$dH.Hdt[length(time)] > 0
+      survival_tol <- run_tol$dH.Hdt[length(time)] > 0
+      survival_both <- run_both$dH.Hdt[length(time)] > 0
+
+      # 3. Dominance: when both symbionts are present, what is the sensitive:tolerant symbiont ratio?
+      tol_per_sen = run_both$S.2[length(time)]/run_both$S.1[length(time)]
+
+      # 4. Symbiont: host ratio
+      sh_ratio_sen = run_sen$S[length(time)]/run_sen$H[length(time)]
+      sh_ratio_tol = run_tol$S[length(time)]/run_tol$H[length(time)]
+      sh_ratio_both = (run_both$S.1[length(time)] + run_both$S.2[length(time)])/run_both$H[length(time)]
+
+      # 5. Host growth rate
+      host_growth_sen = run_sen$dH.Hdt[length(time)]
+      host_growth_tol = run_tol$dH.Hdt[length(time)]
+      host_growth_both = run_both$dH.Hdt[length(time)]
+
+      # return the parameters and summary statistics
+      list("L"=sim_i[1, "L"], "N"=sim_i[1, "N"], "X"=sim_i[1, "X"],
+      "kCO2"=sim_i[1, "kCO2"],
+      "converge_sen"=converge_sen, "converge_tol"=converge_tol, "converge_both"=converge_both,
+      "survival_sen"=survival_sen, "survival_tol"=survival_tol, "survival_both"=survival_both,
+      "tol_per_sen"=tol_per_sen,
+      "sh_ratio_sen"=sh_ratio_sen, "sh_ratio_tol"=sh_ratio_tol, "sh_ratio_both"=sh_ratio_both,
+      "host_growth_sen"=host_growth_sen, "host_growth_tol"=host_growth_tol, "host_growth_both"=host_growth_both)
+
+
+}
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+decreased_sh_sims <- data.frame(decreased_sh, row.names=NULL)
+```
+
+```{r}
+# set the columns to their proper types
+decreased_sh_sims <- transform(decreased_sh_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+      converge_sen=as.logical(converge_sen), converge_tol=as.logical(converge_tol), converge_both=as.logical(converge_both),
+      survival_sen=as.logical(survival_sen), survival_tol=as.logical(survival_tol), survival_both=as.logical(survival_both),
+      tol_per_sen=as.numeric(tol_per_sen),
+      sh_ratio_sen=as.numeric(sh_ratio_sen), sh_ratio_tol=as.numeric(sh_ratio_tol), sh_ratio_both=as.numeric(sh_ratio_both),
+      host_growth_sen=as.numeric(host_growth_sen), host_growth_tol=as.numeric(host_growth_tol), host_growth_both=as.numeric(host_growth_both))
+```
+
+#### 1hi.What percent of hosts with only a sensitive symbiont now survive?
+
+```{r}
+print(paste0(round(sum(decreased_sh_sims$survival_sen)/nrow(decreased_sh_sims)*100, 2), "%"))
+```
+
+#### 1hi. What percent of hosts with only a tolerant symbiont now survive?
+
+```{r}
+print(paste0(round(sum(decreased_sh_sims$survival_tol)/ nrow(decreased_sh_sims)*100, 2), "%"))
+```
+
+#### 1hii. Whaaat?? Why do the tolerant symbionts all survive? Plot the time series
+
+```{r, cache=TRUE}
+selected_sims <- decreased_sh_sims
+par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
+
+for(i in 1:11) {
+      sim_i <- selected_sims[i,]
+      env_i <- coRal::init_env(time=time,
+            L=c(as.numeric(sim_i[1, "L"]), as.numeric(sim_i[1, "L"]), 0),
+            N=c(as.numeric(sim_i[1, "N"]), as.numeric(sim_i[1, "N"]), 0),
+            X=c(as.numeric(sim_i[1, "X"]), as.numeric(sim_i[1, "X"]), 0))
+
+      s_pars_i <- coRal::def_pars(nsym=1)
+      s_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      s_pars_i$initS <- 0.05
+
+      t_pars_i <- coRal::def_pars(nsym=1)
+      t_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      t_pars_i$jCPm <- 1.0
+      t_pars_i$kROS <- 250
+      t_pars_i$jSGm <- 0.15
+      t_pars_i$initS <- 0.05
+
+      both_pars_i <- coRal::def_pars(nsym=2)
+      both_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      both_pars_i$jCPm[2] <- 1.0
+      both_pars_i$kROS[2] <- 250
+      both_pars_i$jSGm[2] <- 0.15
+      both_pars_i$initS <- c(0.025, 0.025)
+
+      s_run_i <- coRal::run_coral(time=time, env=env_i, pars=s_pars_i)
+      t_run_i <- coRal::run_coral(time=time, env=env_i, pars=t_pars_i)
+      both_run_i <- coRal::run_coral(time=time, env=env_i, pars=both_pars_i)
+
+      plot(time[-1], s_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": sens."),
+            xlab="time", ylab="", col=ifelse(s_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], s_run_i$S[-1]/s_run_i$H[-1], col='blue')
+
+      plot(time[-1], t_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": tol."),
+            xlab="time", ylab="", col=ifelse(t_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], t_run_i$S[-1]/t_run_i$H[-1], col='red')
+
+      plot(time[-1], both_run_i$dH.Hdt[-1],  ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": both"),
+            xlab="time", ylab="", col=ifelse(both_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], both_run_i$S.1[-1]/both_run_i$H[-1], col='blue')
+      lines(time[-1], both_run_i$S.2[-1]/both_run_i$H[-1], col='red')
+}
+
+par(mar=c(0, 0, 0, 0))
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Host growth rate\n(negative)\n", "Host growth rate\n (positive)"), col=c("black", "green"), pch=19)
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio"), col=c("blue", "red"), pch=19)
+```
+
+```{r, cache=TRUE}
+selected_sims <- decreased_sh_sims
+par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
+
+for(i in 12:22) {
+      sim_i <- selected_sims[i,]
+      env_i <- coRal::init_env(time=time,
+            L=c(as.numeric(sim_i[1, "L"]), as.numeric(sim_i[1, "L"]), 0),
+            N=c(as.numeric(sim_i[1, "N"]), as.numeric(sim_i[1, "N"]), 0),
+            X=c(as.numeric(sim_i[1, "X"]), as.numeric(sim_i[1, "X"]), 0))
+
+      s_pars_i <- coRal::def_pars(nsym=1)
+      s_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      s_pars_i$initS <- 0.05
+
+      t_pars_i <- coRal::def_pars(nsym=1)
+      t_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      t_pars_i$jCPm <- 1.0
+      t_pars_i$kROS <- 250
+      t_pars_i$jSGm <- 0.15
+      t_pars_i$initS <- 0.05
+
+      both_pars_i <- coRal::def_pars(nsym=2)
+      both_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      both_pars_i$jCPm[2] <- 1.0
+      both_pars_i$kROS[2] <- 250
+      both_pars_i$jSGm[2] <- 0.15
+      both_pars_i$initS <- c(0.025, 0.025)
+
+      s_run_i <- coRal::run_coral(time=time, env=env_i, pars=s_pars_i)
+      t_run_i <- coRal::run_coral(time=time, env=env_i, pars=t_pars_i)
+      both_run_i <- coRal::run_coral(time=time, env=env_i, pars=both_pars_i)
+
+      plot(time[-1], s_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": sens."),
+            xlab="time", ylab="", col=ifelse(s_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], s_run_i$S[-1]/s_run_i$H[-1], col='blue')
+
+      plot(time[-1], t_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": tol."),
+            xlab="time", ylab="", col=ifelse(t_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], t_run_i$S[-1]/t_run_i$H[-1], col='red')
+
+      plot(time[-1], both_run_i$dH.Hdt[-1],  ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": both"),
+            xlab="time", ylab="", col=ifelse(both_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], both_run_i$S.1[-1]/both_run_i$H[-1], col='blue')
+      lines(time[-1], both_run_i$S.2[-1]/both_run_i$H[-1], col='red')
+}
+
+par(mar=c(0, 0, 0, 0))
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Host growth rate\n(negative)\n", "Host growth rate\n (positive)"), col=c("black", "green"), pch=19)
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio"), col=c("blue", "red"), pch=19)
+```
+
+```{r, cache=TRUE}
+selected_sims <- decreased_sh_sims
+par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
+
+for(i in 23:33) {
+      sim_i <- selected_sims[i,]
+      env_i <- coRal::init_env(time=time,
+            L=c(as.numeric(sim_i[1, "L"]), as.numeric(sim_i[1, "L"]), 0),
+            N=c(as.numeric(sim_i[1, "N"]), as.numeric(sim_i[1, "N"]), 0),
+            X=c(as.numeric(sim_i[1, "X"]), as.numeric(sim_i[1, "X"]), 0))
+
+      s_pars_i <- coRal::def_pars(nsym=1)
+      s_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      s_pars_i$initS <- 0.05
+
+      t_pars_i <- coRal::def_pars(nsym=1)
+      t_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      t_pars_i$jCPm <- 1.0
+      t_pars_i$kROS <- 250
+      t_pars_i$jSGm <- 0.15
+      t_pars_i$initS <- 0.05
+
+      both_pars_i <- coRal::def_pars(nsym=2)
+      both_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      both_pars_i$jCPm[2] <- 1.0
+      both_pars_i$kROS[2] <- 250
+      both_pars_i$jSGm[2] <- 0.15
+      both_pars_i$initS <- c(0.025, 0.025)
+
+      s_run_i <- coRal::run_coral(time=time, env=env_i, pars=s_pars_i)
+      t_run_i <- coRal::run_coral(time=time, env=env_i, pars=t_pars_i)
+      both_run_i <- coRal::run_coral(time=time, env=env_i, pars=both_pars_i)
+
+      plot(time[-1], s_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": sens."),
+            xlab="time", ylab="", col=ifelse(s_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], s_run_i$S[-1]/s_run_i$H[-1], col='blue')
+
+      plot(time[-1], t_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": tol."),
+            xlab="time", ylab="", col=ifelse(t_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], t_run_i$S[-1]/t_run_i$H[-1], col='red')
+
+      plot(time[-1], both_run_i$dH.Hdt[-1],  ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": both"),
+            xlab="time", ylab="", col=ifelse(both_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], both_run_i$S.1[-1]/both_run_i$H[-1], col='blue')
+      lines(time[-1], both_run_i$S.2[-1]/both_run_i$H[-1], col='red')
+}
+
+par(mar=c(0, 0, 0, 0))
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Host growth rate\n(negative)\n", "Host growth rate\n (positive)"), col=c("black", "green"), pch=19)
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio"), col=c("blue", "red"), pch=19)
+```
+
+```{r, cache=TRUE}
+selected_sims <- decreased_sh_sims
+par(mfrow=c(6, 6), mar=c(5.1, 2, 1, 1))
+
+for(i in 33:39) {
+      sim_i <- selected_sims[i,]
+      env_i <- coRal::init_env(time=time,
+            L=c(as.numeric(sim_i[1, "L"]), as.numeric(sim_i[1, "L"]), 0),
+            N=c(as.numeric(sim_i[1, "N"]), as.numeric(sim_i[1, "N"]), 0),
+            X=c(as.numeric(sim_i[1, "X"]), as.numeric(sim_i[1, "X"]), 0))
+
+      s_pars_i <- coRal::def_pars(nsym=1)
+      s_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      s_pars_i$initS <- 0.05
+
+      t_pars_i <- coRal::def_pars(nsym=1)
+      t_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      t_pars_i$jCPm <- 1.0
+      t_pars_i$kROS <- 250
+      t_pars_i$jSGm <- 0.15
+      t_pars_i$initS <- 0.05
+
+      both_pars_i <- coRal::def_pars(nsym=2)
+      both_pars_i$kCO2 <- as.numeric(sim_i[1, "kCO2"])
+      both_pars_i$jCPm[2] <- 1.0
+      both_pars_i$kROS[2] <- 250
+      both_pars_i$jSGm[2] <- 0.15
+      both_pars_i$initS <- c(0.025, 0.025)
+
+      s_run_i <- coRal::run_coral(time=time, env=env_i, pars=s_pars_i)
+      t_run_i <- coRal::run_coral(time=time, env=env_i, pars=t_pars_i)
+      both_run_i <- coRal::run_coral(time=time, env=env_i, pars=both_pars_i)
+
+      plot(time[-1], s_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": sens."),
+            xlab="time", ylab="", col=ifelse(s_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], s_run_i$S[-1]/s_run_i$H[-1], col='blue')
+
+      plot(time[-1], t_run_i$dH.Hdt[-1], ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": tol."),
+            xlab="time", ylab="", col=ifelse(t_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], t_run_i$S[-1]/t_run_i$H[-1], col='red')
+
+      plot(time[-1], both_run_i$dH.Hdt[-1],  ylim=c(-0.05, 0.4), pch=20,
+            main=paste0("Sim. ", i, ": both"),
+            xlab="time", ylab="", col=ifelse(both_run_i$dH.Hdt[-1] > 0, "green", "black"))
+      lines(time[-1], both_run_i$S.1[-1]/both_run_i$H[-1], col='blue')
+      lines(time[-1], both_run_i$S.2[-1]/both_run_i$H[-1], col='red')
+}
+
+par(mar=c(0, 0, 0, 0))
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Host growth rate\n(negative)\n", "Host growth rate\n (positive)"), col=c("black", "green"), pch=19)
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio"), col=c("blue", "red"), pch=19)
 ```
