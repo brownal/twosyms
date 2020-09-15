@@ -48,7 +48,7 @@ Redone with yC^-1 in rhoN on 7/23/2020
 
 ## Simulation 100 days of host-symbiont dynamics to categorize outcomes
 
-```{r}
+```{r, cache=TRUE}
 body(run_coral)
 # one-symbiont parameters
 pars1 <- def_pars(nsym=1)
@@ -63,7 +63,7 @@ equil_time <- seq(1, 600, 0.1)
 # draw sets of parameter values randomly
 # hopefully this will speed things up compared to looking over a grid
 
-draws = 10000; # number of sets of random parameter combinations to look over
+draws = 2000; # number of sets of random parameter combinations to look over
 
 search_params <- data.frame(
                             # Environmental parameters
@@ -656,6 +656,37 @@ for(i in T_equil_plots) {
       lines(time[-1], selected_run$S.1[-1]/selected_run$H[-1], col='blue')
       lines(time[-1], selected_run$S.2[-1]/selected_run$H[-1], col='red')
 }
+
+par(mar=c(0, 0, 0, 0))
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("topleft", c("Host growth\nrate\n", "Sensitive\nsymb:host ratio\n", "Tolerant\nsymb:host ratio"), col=c("black", "blue", "red"), pch=19)
+
+```
+
+
+#### Sample plots
+
+```{r}
+
+S_sim <- rescue_tol_param[rescue_tol_param$reason == "S_lives", ]
+
+selected_sim <- S_sim[3516, ]
+selected_env <- coRal::init_env(time=time,
+      L=c(as.numeric(selected_sim[1, "L"]), as.numeric(selected_sim[1, "L"]), 0),
+      N=c(as.numeric(selected_sim[1, "N"]), as.numeric(selected_sim[1, "N"]), 0),
+      X=c(as.numeric(selected_sim[1, "X"]), as.numeric(selected_sim[1, "X"]), 0))
+
+selected_pars <- coRal::def_pars(nsym=1)
+selected_pars$kCO2 <- as.numeric(selected_sim[1, "kCO2"])
+selected_pars$initS <- 1e-2
+
+selected_run <- coRal::run_coral(time=time, env=selected_env, pars=selected_pars)
+
+plot(time[-1], selected_run$dH.Hdt[-1], type="l", ylim=c(-0.05, 0.4),
+      main=paste0("Sim. ", i),
+      xlab="time", ylab="")
+lines(time[-1], selected_run$S/selected_run$H, col="#648FFF")
+
 
 par(mar=c(0, 0, 0, 0))
 plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)

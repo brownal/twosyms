@@ -215,7 +215,8 @@ points_T_dies = points_T_dies[1:plot_count_T_dies,];
 ```{r, cache=FALSE}
 #par(mfrow=c(2, 2), pty="s")
 
-pdf("food_light.pdf")
+#pdf("food_light.pdf")
+png("fod_light.png")
 plot(points_S_lives$L, points_S_lives$X, pch=1, col="#648FFF80",
      main="Effect of food and light on recovery from bleached state", #\nfor randomly drawn environment, coral and tolerant symb. traits
       xlab=expression(paste("Light (mol photons ", "m"^"-2", "d"^"-1", ")")),
@@ -229,22 +230,4 @@ legend("topleft", c("No recovery", "Recovers w/ sensitive symbiont", "Recovers w
 col=c(rgb(0, 0, 0), "#648FFF", "#FFB000", "#DC267F"), pch=c(0, 1, 19, 15), bg="white")
 
 dev.off()
-
-
-# plot(points_S_lives$N, points_S_lives$X, pch=1, col="#648FFF80",
-#       main="Food vs Nitrogen", xlab="N", ylab="X", xlim=c(0, 4e-6), ylim=c(0, 4e-7))
-# points(points_T_dies$N, points_T_dies$X, pch=0, col=rgb(0, 0, 0, alpha=0.5))
-# points(points_T_dominates$N, points_T_dominates$X, pch=15, col="#FFB000")
-# points(points_rescue$N, points_rescue$X, pch=19, col="#DC267F")
-#
-# plot(points_S_lives$X, points_S_lives$kCO2, pch=1, col="#648FFF80",
-#       main="kCO2 vs Food", xlab="X", ylab="kCO2", xlim=c(0, 4e-7), ylim=c(10, 50))
-# points(points_T_dies$X, points_T_dies$kCO2, pch=0, col=rgb(0, 0, 0, alpha=0.5))
-# points(points_T_dominates$X, points_T_dominates$kCO2, pch=15, col="#FFB000")
-# points(points_rescue$X, points_rescue$kCO2, pch=19, col="#DC267F")
-
-# plot.new()
-# legend("topright", c("No recovery", "Recovers w/ S", "Recovers w/ T", "Recovers w/ S in \npresence of T"),
-# col=c(rgb(0, 0, 0), "#648FFF", "#FFB000", "#DC267F"), pch=c(0, 1, 15, 19))
-
 ```
