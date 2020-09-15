@@ -1,0 +1,1026 @@
+---
+title: "Investigating a special case of shuffling in a constant environment"
+author: "Ross Cunning and Alexandra Brown"
+date: "4/15/2020"
+output: html_document
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, fig.width=10, fig.height=10)
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+
+options(repr.plot.res=240)
+```
+
+# Run the model when the tolerant differs from the sensitive in various parameters
+Parameters:
+* jCPm
+* kROS
+* jSGm
+* jCPm & kROS
+* jCPm & jSGm
+* kROS & jSGm
+
+## A function for detecting when the host growth rate changes sign
+
+```{r}
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+}
+```
+
+## One-symbiont case
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=1)
+pars$initS <- 1e-4
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+oneSymbOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- run$S[length(run$S)] / run$H[length(run$H)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+
+    gr_changes_list <- detect_gr_change(run)
+    last_gr_change <- NA
+    if (length(gr_changes_list) > 0) {
+        last_gr_change <- gr_changes_list[length(gr_changes_list)]
+    }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH,
+         "changeH"=changeH, "changeS"=changeS, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+oneSymb <- data.frame(oneSymbOutput, row.names=NULL)
+```
+
+## Two symbiont case, jCPm different
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsjCPmOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbsjCPm <- data.frame(twoSymbsjCPmOutput, row.names=NULL)
+```
+
+## Two symbiont case, kROS different
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$kROS[2] <- 250
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbskROSOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbskROS <- data.frame(twoSymbskROSOutput, row.names=NULL)
+```
+
+## Two symbiont case, jSGm different
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jSGm[2] <- 0.15
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsjSGmOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbsjSGm <- data.frame(twoSymbsjSGmOutput, row.names=NULL)
+```
+
+## Two symbiont case, jCPm and kROS different
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$kROS[2] <- 250
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsjCPmkROSOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbsjCPmkROS <- data.frame(twoSymbsjCPmkROSOutput, row.names=NULL)
+```
+
+## Two symbiont case, jCPm and jSGm different
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0
+pars$jSGm[2] <- 0.15
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbsjCPmjSGmOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbsjCPmjSGm <- data.frame(twoSymbsjCPmjSGmOutput, row.names=NULL)
+```
+
+## Two symbiont case, kROS and jSGm different
+
+```{r}
+inputDF <- expand.grid("L"=seq(0, 30, 3), "N"=seq(2e-7, 18e-7, 4e-7), "X"=c(5e-8, 1e-7, 2e-7), "kCO2"=c(10))
+
+time<-seq(1, 3000, 0.1)
+pars <- def_pars(nsym=2)
+pars$kROS[2] <- 250
+pars$jSGm[2] <- 0.15
+pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+start <- proc.time()
+
+twoSymbskROSjSGmOutput <- foreach(i=1:nrow(inputDF), .combine='rbind', .packages='dplyr') %dopar% {
+    env <- coRal::init_env(time=time, L=c(inputDF[i, "L"], inputDF[i, "L"], 0),
+    N=c(inputDF[i, "N"], inputDF[i, "N"], 0),
+    X=c(inputDF[i, "X"], inputDF[i, "X"], 0))
+
+
+    run <- coRal::run_coral(time=time, env=env, pars=replace(pars, "kCO2", inputDF[i, "kCO2"]))
+    gr <- run$dH.Hdt[length(run$dH.Hdt)]
+    finalSH <- (run$S.1[length(run$S.1)] + run$S.2[length(run$S.2)]) / run$H[length(run$H)]
+    finalST <- run$S.1[length(run$S.1)]/run$S.2[length(run$S.2)]
+
+
+    changeH <- ifelse(abs(run$dH.Hdt[length(run$dH.Hdt)] - run$dH.Hdt[length(run$dH.Hdt)-100]) < 0.00001, T, F)
+    changeS1 <- ifelse(abs(run$dS.Sdt.1[length(run$dS.Sdt.1)] - run$dS.Sdt.1[length(run$dS.Sdt.1)-100]) < 0.00001, T, F)
+    changeS2 <- ifelse(abs(run$dS.Sdt.2[length(run$dS.Sdt.2)] - run$dS.Sdt.2[length(run$dS.Sdt.2)-100]) < 0.00001, T, F)
+
+   gr_changes_list <- detect_gr_change(run)
+   last_gr_change <- NA
+   if (length(gr_changes_list) > 0) {
+      last_gr_change <- gr_changes_list[length(gr_changes_list)]
+   }
+
+    list("L"=inputDF[i, "L"], "N"=inputDF[i, "N"], "X"=inputDF[i, "X"], "kCO2"=inputDF[i, "kCO2"],
+         "gr"=gr, "finalSH"=finalSH, "finalST"=finalST,
+         "changeH"=changeH, "changeS1"=changeS1, "changeS2"=changeS2, "last_sign_change_gr"=last_gr_change)
+}
+
+stopCluster(cl)
+print(proc.time() - start)
+twoSymbskROSjSGm <- data.frame(twoSymbskROSjSGmOutput, row.names=NULL)
+```
+
+# Sensitive alone: where is growth rate positive?
+
+```{r}
+par(mfrow=c(2, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  data <- oneSymb$gr[(oneSymb$X==X)]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- oneSymb$gr[(oneSymb$X==X)]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+  colmax = max(as.numeric(oneSymb$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
+```
+
+# 2 symbiont case: where do hosts have positive growth?
+
+## Only one parameter different
+
+```{r}
+par(mfrow=c(4, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+# jCPm different
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  data <- twoSymbsjCPm$gr[(twoSymbsjCPm$X==X) ]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- twoSymbsjCPm$gr[(twoSymbsjCPm$X==X) ]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+ colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+      as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+colbreak = colmax/10
+plot(mat, xlab="N", ylab="L", main=paste0("jCPm =1.0, X = ", X), na.col="lightgray", na.print=FALSE,
+     breaks=seq(0, colmax, colbreak), col=viridis(10),
+     key=NULL, fmt.cell='%.2f')
+}
+
+ # kROS different
+ for (X in c(5e-8, 1e-7, 2e-7)) {
+   data <- twoSymbskROS$gr[(twoSymbskROS$X==X) ]
+   mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   mat <- mat[nrow(mat):1,]
+
+   gr <- twoSymbskROS$gr[(twoSymbskROS$X==X) ]
+   grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   grmat <- grmat[nrow(grmat):1,]
+
+   for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+              if (grmat[i, j] <= 0) {
+                   mat[i, j] <- NA
+             }
+        }
+  }
+
+  colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+        as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("kROS = 250, X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+  # jSGm different
+  for (X in c(5e-8, 1e-7, 2e-7)) {
+    data <- twoSymbsjSGm$gr[(twoSymbsjSGm$X==X) ]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    mat <- mat[nrow(mat):1,]
+
+    gr <- twoSymbsjSGm$gr[(twoSymbsjSGm$X==X) ]
+    grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    grmat <- grmat[nrow(grmat):1,]
+
+    for (i in 1:nrow(mat)) {
+         for (j in 1:ncol(mat)) {
+               if (grmat[i, j] <= 0) {
+                    mat[i, j] <- NA
+              }
+         }
+  }
+
+  colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+        as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("jSGm = 0.15, X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+      as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+colbreak = colmax/10
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
+```
+
+## Two parameters different
+
+```{r}
+par(mfrow=c(4, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+# jCPm and kROS different
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  data <- twoSymbsjCPmkROS$gr[(twoSymbsjCPmkROS$X==X) ]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  mat <- mat[nrow(mat):1,]
+
+  gr <- twoSymbsjCPmkROS$gr[(twoSymbsjCPmkROS$X==X) ]
+  grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  grmat <- grmat[nrow(grmat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if (grmat[i, j] <= 0) {
+                  mat[i, j] <- NA
+            }
+       }
+ }
+
+ colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+       as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+colbreak = colmax/10
+plot(mat, xlab="N", ylab="L", main=paste0("jCPm =1.0, kROS =250\nX = ", X), na.col="lightgray", na.print=FALSE,
+     breaks=seq(0, colmax, colbreak), col=viridis(10),
+     key=NULL, fmt.cell='%.2f')
+}
+
+ # jCPm and jSGm different
+ for (X in c(5e-8, 1e-7, 2e-7)) {
+   data <- twoSymbsjCPmjSGm$gr[(twoSymbsjCPmjSGm$X==X) ]
+   mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   mat <- mat[nrow(mat):1,]
+
+   gr <- twoSymbsjCPmjSGm$gr[(twoSymbsjCPmjSGm$X==X) ]
+   grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   grmat <- grmat[nrow(grmat):1,]
+
+   for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+              if (grmat[i, j] <= 0) {
+                   mat[i, j] <- NA
+             }
+        }
+  }
+
+  colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+        as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, jSGm = 0.15\nX = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+  # kROS and jSGm different
+  for (X in c(5e-8, 1e-7, 2e-7)) {
+    data <- twoSymbskROSjSGm$gr[(twoSymbskROSjSGm$X==X) ]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    mat <- mat[nrow(mat):1,]
+
+    gr <- twoSymbskROSjSGm$gr[(twoSymbskROSjSGm$X==X) ]
+    grmat <- matrix(as.numeric(gr), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    grmat <- grmat[nrow(grmat):1,]
+
+    for (i in 1:nrow(mat)) {
+         for (j in 1:ncol(mat)) {
+               if (grmat[i, j] <= 0) {
+                    mat[i, j] <- NA
+              }
+         }
+  }
+
+  colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+        as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("kROS = 250, jSGm = 0.15\nX = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.2f')
+}
+
+colmax = max(as.numeric(twoSymbsjCPm$gr), as.numeric(twoSymbskROS$gr), as.numeric(twoSymbsjSGm$gr),
+      as.numeric(twoSymbsjCPmkROS$gr), as.numeric(twoSymbsjCPmjSGm$gr), as.numeric(twoSymbskROSjSGm$gr))
+colbreak = colmax/10
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),2), round(seq(colbreak, colmax, colbreak),2), sep=" to "), "gr <= 0"),
+       fill=c(viridis(10), "lightgray"),
+                       title="Host growth rate", cex=1, ncol=2)
+```
+
+# Where do hosts grow only in the 2 symbiont case, and who dominates in these cases?
+## One parameter different
+
+```{r}
+par(mfrow=c(4, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+# jCPm different
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbsjCPm$gr[(twoSymbsjCPm$X==X) ]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+  data <- log10(as.numeric(twoSymbsjCPm$finalST[(twoSymbsjCPm$X==X) ]))
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  mat <- mat[nrow(mat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+  plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, X = ", X), na.col="lightgray", na.print=FALSE,
+      breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+      key=NULL, fmt.cell='%.0f')
+}
+
+
+ # kROS different
+ for (X in c(5e-8, 1e-7, 2e-7)) {
+   grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+   grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+   grmat1 <- grmat1[nrow(grmat1):1,]
+
+   grdata2 <- twoSymbskROS$gr[(twoSymbskROS$X==X) ]
+   grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   grmat2 <- grmat2[nrow(grmat1):1,]
+
+   data <- log10(as.numeric(twoSymbskROS$finalST[(twoSymbskROS$X==X) ]))
+   mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   mat <- mat[nrow(mat):1,]
+
+   for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+              if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                   mat[i, j] <- NA
+             }
+        }
+   }
+
+   plot(mat, xlab="N", ylab="L", main=paste0("kROS = 250, X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+       key=NULL, fmt.cell='%.0f')
+ }
+
+
+  # jSGm different
+  for (X in c(5e-8, 1e-7, 2e-7)) {
+    grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+    grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+    grmat1 <- grmat1[nrow(grmat1):1,]
+
+    grdata2 <- twoSymbsjSGm$gr[(twoSymbsjSGm$X==X) ]
+    grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    grmat2 <- grmat2[nrow(grmat1):1,]
+
+    data <- log10(as.numeric(twoSymbsjSGm$finalST[(twoSymbsjSGm$X==X) ]))
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    mat <- mat[nrow(mat):1,]
+
+    for (i in 1:nrow(mat)) {
+         for (j in 1:ncol(mat)) {
+               if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                    mat[i, j] <- NA
+              }
+         }
+    }
+
+    plot(mat, xlab="N", ylab="L", main=paste0("jSGm = 0.15, X = ", X), na.col="lightgray", na.print=FALSE,
+        breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+        key=NULL, fmt.cell='%.0f')
+  }
+
+
+  plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+  legend("top", legend=c(paste(c("-1e3", -100, -10, -1, 0, 1, 10, 100), c(-100, -10, -1, 0, 1, 10, 100, "1e3"), sep=" to "), "gr <= 0"),
+   fill=c(viridis(8), "lightgray"),
+                   title="log10 S:T", cex=1, ncol=2)
+```
+## Two parameters different
+
+```{r}
+par(mfrow=c(4, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+# jCPm and kROS different
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbsjCPmkROS$gr[(twoSymbsjCPmkROS$X==X) ]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+  data <- log10(as.numeric(twoSymbsjCPmkROS$finalST[(twoSymbsjCPmkROS$X==X) ]))
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  mat <- mat[nrow(mat):1,]
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+  plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, kROS = 250\nX = ", X), na.col="lightgray", na.print=FALSE,
+      breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+      key=NULL, fmt.cell='%.0f')
+}
+
+
+ # jCPm and jSGm different
+ for (X in c(5e-8, 1e-7, 2e-7)) {
+   grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+   grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+   grmat1 <- grmat1[nrow(grmat1):1,]
+
+   grdata2 <- twoSymbsjCPmjSGm$gr[(twoSymbsjCPmjSGm$X==X) ]
+   grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   grmat2 <- grmat2[nrow(grmat1):1,]
+
+   data <- log10(as.numeric(twoSymbsjCPmjSGm$finalST[(twoSymbsjCPmjSGm$X==X) ]))
+   mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   mat <- mat[nrow(mat):1,]
+
+   for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+              if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                   mat[i, j] <- NA
+             }
+        }
+   }
+
+   plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, jSGm=0.15\nX = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+       key=NULL, fmt.cell='%.0f')
+ }
+
+
+  # kROS and jSGm different
+  for (X in c(5e-8, 1e-7, 2e-7)) {
+    grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+    grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+    grmat1 <- grmat1[nrow(grmat1):1,]
+
+    grdata2 <- twoSymbskROSjSGm$gr[(twoSymbskROSjSGm$X==X) ]
+    grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    grmat2 <- grmat2[nrow(grmat1):1,]
+
+    data <- log10(as.numeric(twoSymbskROSjSGm$finalST[(twoSymbskROSjSGm$X==X) ]))
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    mat <- mat[nrow(mat):1,]
+
+    for (i in 1:nrow(mat)) {
+         for (j in 1:ncol(mat)) {
+               if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0)) {
+                    mat[i, j] <- NA
+              }
+         }
+    }
+
+    plot(mat, xlab="N", ylab="L", main=paste0("kROS = 250, jSGm = 0.15\nX = ", X), na.col="lightgray", na.print=FALSE,
+        breaks=c(-1000, -100, -10, -1, 0, 1, 10, 100, 1000), col=viridis(8),
+        key=NULL, fmt.cell='%.0f')
+  }
+
+
+  plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+  legend("top", legend=c(paste(c("-1e3", -100, -10, -1, 0, 1, 10, 100), c(-100, -10, -1, 0, 1, 10, 100, "1e3"), sep=" to "), "gr <= 0"),
+   fill=c(viridis(8), "lightgray"),
+                   title="log10 S:T", cex=1, ncol=2)
+```
+
+# In cases of "rescue" of sensitive symbiont, when does the host last change growth rate?
+Rescue = sensitive dominates in two-symbiont case, despite the fact gr <= 0 when sensitive is the only symbiont
+
+## One parameter different
+
+```{r}
+par(mfrow=c(4, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+# jCPm different
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  data <- twoSymbsjCPm$last_sign_change_gr[(twoSymbsjCPm$X==X) ]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  mat <- mat[nrow(mat):1,]
+
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbsjCPm$gr[(twoSymbsjCPm$X==X) ]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+  st <- log10(as.numeric(twoSymbsjCPm$finalST[(twoSymbsjCPm$X==X) ]))
+  stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbsjCPm$L), unique(twoSymbsjCPm$N)))
+  stmat <- stmat[nrow(stmat):1,]
+
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+
+  colmax = 3000
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, X = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.0f')
+}
+
+
+ # kROS different
+ for (X in c(5e-8, 1e-7, 2e-7)) {
+   data <- twoSymbskROS$last_sign_change_gr[(twoSymbskROS$X==X) ]
+   mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   mat <- mat[nrow(mat):1,]
+
+   grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+   grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+   grmat1 <- grmat1[nrow(grmat1):1,]
+
+   grdata2 <- twoSymbskROS$gr[(twoSymbskROS$X==X) ]
+   grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   grmat2 <- grmat2[nrow(grmat1):1,]
+
+   st <- log10(as.numeric(twoSymbskROS$finalST[(twoSymbskROS$X==X) ]))
+   stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbskROS$L), unique(twoSymbskROS$N)))
+   stmat <- stmat[nrow(stmat):1,]
+
+
+   for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+              if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                   mat[i, j] <- NA
+             }
+        }
+   }
+
+
+   colmax = 3000
+   colbreak = colmax/10
+   plot(mat, xlab="N", ylab="L", main=paste0("kROS = 250, X = ", X), na.col="lightgray", na.print=FALSE,
+        breaks=seq(0, colmax, colbreak), col=viridis(10),
+        key=NULL, fmt.cell='%.0f')
+ }
+
+
+
+  # jSGm different
+  for (X in c(5e-8, 1e-7, 2e-7)) {
+    data <- twoSymbsjSGm$last_sign_change_gr[(twoSymbsjSGm$X==X) ]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    mat <- mat[nrow(mat):1,]
+
+    grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+    grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+    grmat1 <- grmat1[nrow(grmat1):1,]
+
+    grdata2 <- twoSymbsjSGm$gr[(twoSymbsjSGm$X==X) ]
+    grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    grmat2 <- grmat2[nrow(grmat1):1,]
+
+    st <- log10(as.numeric(twoSymbsjSGm$finalST[(twoSymbsjSGm$X==X) ]))
+    stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbsjSGm$L), unique(twoSymbsjSGm$N)))
+    stmat <- stmat[nrow(stmat):1,]
+
+
+    for (i in 1:nrow(mat)) {
+         for (j in 1:ncol(mat)) {
+               if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                    mat[i, j] <- NA
+              }
+         }
+    }
+
+
+    colmax = 3000
+    colbreak = colmax/10
+    plot(mat, xlab="N", ylab="L", main=paste0("jSGm = 0.15, X = ", X), na.col="lightgray", na.print=FALSE,
+         breaks=seq(0, colmax, colbreak), col=viridis(10),
+         key=NULL, fmt.cell='%.0f')
+  }
+
+
+
+  plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+  legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+         fill=c(viridis(10), "lightgray"),
+                         title="Last time gr sign changed", cex=1, ncol=2)
+```
+## Two parameters different
+
+```{r}
+par(mfrow=c(4, 3), pty="s", mai=c(0.35,0.35,0.35,0.35))
+
+# jCPm and kROS different
+for (X in c(5e-8, 1e-7, 2e-7)) {
+  data <- twoSymbsjCPmkROS$last_sign_change_gr[(twoSymbsjCPmkROS$X==X) ]
+  mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  mat <- mat[nrow(mat):1,]
+
+  grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+  grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+  grmat1 <- grmat1[nrow(grmat1):1,]
+
+  grdata2 <- twoSymbsjCPmkROS$gr[(twoSymbsjCPmkROS$X==X) ]
+  grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  grmat2 <- grmat2[nrow(grmat1):1,]
+
+  st <- log10(as.numeric(twoSymbsjCPmkROS$finalST[(twoSymbsjCPmkROS$X==X) ]))
+  stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbsjCPmkROS$L), unique(twoSymbsjCPmkROS$N)))
+  stmat <- stmat[nrow(stmat):1,]
+
+
+  for (i in 1:nrow(mat)) {
+       for (j in 1:ncol(mat)) {
+             if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                  mat[i, j] <- NA
+            }
+       }
+  }
+
+
+  colmax = 3000
+  colbreak = colmax/10
+  plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, kROS = 250\nX = ", X), na.col="lightgray", na.print=FALSE,
+       breaks=seq(0, colmax, colbreak), col=viridis(10),
+       key=NULL, fmt.cell='%.0f')
+}
+
+
+
+ # jCPm and jSGm different
+ for (X in c(5e-8, 1e-7, 2e-7)) {
+   data <- twoSymbsjCPmjSGm$last_sign_change_gr[(twoSymbsjCPmjSGm$X==X) ]
+   mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   mat <- mat[nrow(mat):1,]
+
+   grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+   grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+   grmat1 <- grmat1[nrow(grmat1):1,]
+
+   grdata2 <- twoSymbsjCPmjSGm$gr[(twoSymbsjCPmjSGm$X==X) ]
+   grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   grmat2 <- grmat2[nrow(grmat1):1,]
+
+   st <- log10(as.numeric(twoSymbsjCPmjSGm$finalST[(twoSymbsjCPmjSGm$X==X) ]))
+   stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbsjCPmjSGm$L), unique(twoSymbsjCPmjSGm$N)))
+   stmat <- stmat[nrow(stmat):1,]
+
+
+   for (i in 1:nrow(mat)) {
+        for (j in 1:ncol(mat)) {
+              if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                   mat[i, j] <- NA
+             }
+        }
+   }
+
+
+   colmax = 3000
+   colbreak = colmax/10
+   plot(mat, xlab="N", ylab="L", main=paste0("jCPm = 1.0, jSGm = 0.15\nX = ", X), na.col="lightgray", na.print=FALSE,
+        breaks=seq(0, colmax, colbreak), col=viridis(10),
+        key=NULL, fmt.cell='%.0f')
+ }
+
+
+
+  # kROS and jSGm different
+  for (X in c(5e-8, 1e-7, 2e-7)) {
+    data <- twoSymbskROSjSGm$last_sign_change_gr[(twoSymbskROSjSGm$X==X) ]
+    mat <- matrix(as.numeric(data), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    mat <- mat[nrow(mat):1,]
+
+    grdata1 <- oneSymb$gr[(oneSymb$X==X)]
+    grmat1 <- matrix(as.numeric(grdata1), nrow=11, dimnames = list(unique(oneSymb$L), unique(oneSymb$N)))
+    grmat1 <- grmat1[nrow(grmat1):1,]
+
+    grdata2 <- twoSymbskROSjSGm$gr[(twoSymbskROSjSGm$X==X) ]
+    grmat2 <- matrix(as.numeric(grdata2), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    grmat2 <- grmat2[nrow(grmat1):1,]
+
+    st <- log10(as.numeric(twoSymbskROSjSGm$finalST[(twoSymbskROSjSGm$X==X) ]))
+    stmat <- matrix(as.numeric(st), nrow=11, dimnames = list(unique(twoSymbskROSjSGm$L), unique(twoSymbskROSjSGm$N)))
+    stmat <- stmat[nrow(stmat):1,]
+
+
+    for (i in 1:nrow(mat)) {
+         for (j in 1:ncol(mat)) {
+               if ((grmat2[i, j] <= 0) | (grmat1[i, j] > 0) | (stmat[i, j] <= 0)) {
+                    mat[i, j] <- NA
+              }
+         }
+    }
+
+
+    colmax = 3000
+    colbreak = colmax/10
+    plot(mat, xlab="N", ylab="L", main=paste0("kROS = 250, jSGm = 0.15\nX = ", X), na.col="lightgray", na.print=FALSE,
+         breaks=seq(0, colmax, colbreak), col=viridis(10),
+         key=NULL, fmt.cell='%.0f')
+  }
+
+
+
+  plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+  legend("top", legend=c(paste(round(seq(0, colmax-colbreak, colbreak),0), round(seq(colbreak, colmax, colbreak),0), sep=" to "), "gr <= 0"),
+         fill=c(viridis(10), "lightgray"),
+                         title="Last time gr sign changed", cex=1, ncol=2)
+```
