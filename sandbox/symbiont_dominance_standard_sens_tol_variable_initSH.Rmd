@@ -1,0 +1,311 @@
+---
+title: "Symbiont dominance: when does a standard sensitive or tolerant symbiont dominate the host?"
+author: "Ross Cunning and Alexandra Brown"
+date: "7/28/2020"
+output:
+      html_document:
+            code_folding: hide
+---
+
+How does the initial (reasonably high) symbiont:host ratio affect "survival" of hosts with the sensitive symbiont, the tolerant symbiont, or both?
+I'm asking this question because I've previously found some instances where the host was able to survive with a sensitive or a tolerant symbiont but not both at the same time.
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+
+options(repr.plot.res=240)
+```
+
+```{r}
+# A function for detecting when the host growth rate changes sign
+
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    changelist <- ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+    if (length(changelist) > 0) {
+          return(changelist[length(changelist)])
+   }
+   return(NA)
+}
+```
+
+## Set symbiont parameters
+
+```{r}
+# parameters for single-symbiont simulations
+# sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+
+# tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+
+# parameters for two-symbiont simulations
+# sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+```
+
+# Simulate healthy corals with sensitive and tolerant symbionts alone and together
+
+The goal is to find out
+
+1. Under which conditions can the symbionts survive (separately or together)?
+      + Environmental conditions
+      + Initial symbiont:host ratio
+      + Host kCO2
+2. When both symbionts are present, which one dominates the host?
+
+```{r, cache=TRUE}
+
+# Code for run_coral, so we can make sure the updated version was used
+body(coRal::run_coral)
+
+# run simulations for 600 days
+time<-seq(1, 600, 0.1)
+
+search_params <- expand.grid("L"=seq(0, 40, length.out=11),        # Light, values between 0 and 40
+                            "N"=seq(0, 4e-6, length.out=11),       # DIN, values between 0 and 4e-6
+                            "X" = seq(0, 4e-7, length.out=11),     # Food, values between 0 and 4e07
+                            "kCO2" = seq(10, 50, length.out=11),   # kCO2, values between 10 and 50
+                            "initSH" = 10^seq(-2, 0, 0.25))         # initial symbiont:host ratio, values between 10^-2 and 1
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+
+    # Simulations!
+    # simulate dynamics with just the sensitive symbiont
+    run_sen <- coRal::run_coral(time=time, env=env, pars=replace(pars_sen, c("kCO2", "initS"), c(search_params[i, "kCO2"], search_params[i, "initSH"])))
+
+    # simulate dynamics with just the tolerant symbiont
+    run_tol <- coRal::run_coral(time=time, env=env, pars=replace(pars_tol, c("kCO2", "initS"), c(search_params[i, "kCO2"], search_params[i, "initSH"])))
+
+    # simulate dynamics with both symbionts
+    tmp_pars_both <- replace(pars_both, "kCO2", search_params[i, "kCO2"])
+    tmp_pars_both$initS <- search_params[i, "initSH"] * c(0.5, 0.5)
+    run_both <- coRal::run_coral(time=time, env=env, pars=tmp_pars_both)
+
+
+    # Process simulations to get summary statistics
+
+    # 1. Convergence: have the host and symbiont growth rates stabilized? (Changed by no more than 10^-6 between the last and penultimate time steps)
+    # 1a. Simulation with sensitive symbiont alone
+    converge_sen_H <- (abs(run_sen$dH.Hdt[length(time)] - run_sen$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_sen_S <- (abs(run_sen$dS.Sdt[length(time)] - run_sen$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_sen <- converge_sen_H & converge_sen_S
+
+    # 1b. Simulation with tolerant symbiont alone
+    converge_tol_H <- (abs(run_tol$dH.Hdt[length(time)] - run_tol$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_tol_S <- (abs(run_tol$dS.Sdt[length(time)] - run_tol$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_tol <- converge_tol_H & converge_tol_S
+
+    # 1c. Simulation with both symbionts
+    converge_both_H <- (abs(run_both$dH.Hdt[length(time)] - run_both$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_both_S1 <- (abs(run_both$dS.Sdt.1[length(time)] - run_both$dS.Sdt.1[length(time)-1]) <= 1e-6)
+    converge_both_S2 <- (abs(run_both$dS.Sdt.2[length(time)] - run_both$dS.Sdt.2[length(time)-1]) <= 1e-6)
+    converge_both <- converge_both_H & (converge_both_S1 & converge_both_S2)
+
+    # 2. Survival: does the coral have positive growth at the end of the simulation?
+    survival_sen <- run_sen$dH.Hdt[length(time)] > 0
+    survival_tol <- run_tol$dH.Hdt[length(time)] > 0
+    survival_both <- run_both$dH.Hdt[length(time)] > 0
+
+    # 3. Dominance: when both symbionts are present, what is the sensitive:tolerant symbiont ratio?
+    tol_per_sen = run_both$S.2[length(time)]/run_both$S.1[length(time)]
+
+    # 4. Symbiont: host ratio
+    sh_ratio_sen = run_sen$S[length(time)]/run_sen$H[length(time)]
+    sh_ratio_tol = run_tol$S[length(time)]/run_tol$H[length(time)]
+    sh_ratio_both = (run_both$S.1[length(time)] + run_both$S.2[length(time)])/run_both$H[length(time)]
+
+    # 5. Host growth rate
+    host_growth_sen = run_sen$dH.Hdt[length(time)]
+    host_growth_tol = run_tol$dH.Hdt[length(time)]
+    host_growth_both = run_both$dH.Hdt[length(time)]
+
+    # return the parameters and summary statistics
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
+    "kCO2"=search_params[i, "kCO2"], "initSH"=search_params[i, "initSH"],
+    "converge_sen"=converge_sen, "converge_tol"=converge_tol, "converge_both"=converge_both,
+    "survival_sen"=survival_sen, "survival_tol"=survival_tol, "survival_both"=survival_both,
+    "tol_per_sen"=tol_per_sen,
+    "sh_ratio_sen"=sh_ratio_sen, "sh_ratio_tol"=sh_ratio_tol, "sh_ratio_both"=sh_ratio_both,
+    "host_growth_sen"=host_growth_sen, "host_growth_tol"=host_growth_tol, "host_growth_both"=host_growth_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+healthy_sims <- data.frame(results, row.names=NULL)
+```
+
+```{r}
+# set the columns to their proper types
+healthy_sims <- transform(healthy_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2), initSH=as.numeric(initSH),
+      converge_sen=as.logical(converge_sen), converge_tol=as.logical(converge_tol), converge_both=as.logical(converge_both),
+      survival_sen=as.logical(survival_sen), survival_tol=as.logical(survival_tol), survival_both=as.logical(survival_both),
+      tol_per_sen=as.numeric(tol_per_sen),
+      sh_ratio_sen=as.numeric(sh_ratio_sen), sh_ratio_tol=as.numeric(sh_ratio_tol), sh_ratio_both=as.numeric(sh_ratio_both),
+      host_growth_sen=as.numeric(host_growth_sen), host_growth_tol=as.numeric(host_growth_tol), host_growth_both=as.numeric(host_growth_both))
+```
+
+
+```{r, cache=FALSE}
+
+# Set up the matrices that will be plotted
+plot_L_sen <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$L)))
+plot_L_tol <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$L)))
+plot_L_both <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$L)),
+      dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$L)))
+
+plot_N_sen <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$N)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$N)))
+plot_N_tol <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$N)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$N)))
+plot_N_both <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$N)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$N)))
+
+plot_X_sen <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$X)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$X)))
+plot_X_tol <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$X)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$X)))
+plot_X_both <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$X)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$X)))
+
+plot_kCO2_sen <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$kCO2)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$kCO2)))
+plot_kCO2_tol <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$kCO2)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$kCO2)))
+plot_kCO2_both <- matrix(0, nrow=length(unique(healthy_sims$initSH)), ncol=length(unique(healthy_sims$kCO2)),
+            dimnames=list(unique(healthy_sims$initSH), unique(healthy_sims$kCO2)))
+
+plot_all_sen <- rep(0, length(unique(healthy_sims$initSH)))
+plot_all_tol <- rep(0, length(unique(healthy_sims$initSH)))
+plot_all_both <- rep(0, length(unique(healthy_sims$initSH)))
+
+
+# For each combination of environmental/host parameters and initial S:H ratio, find the fraction of simulations that resulted in host survival
+for (i in 1:length(unique(healthy_sims$initSH))) {
+      for (j in 1:length(unique(healthy_sims$L))) {
+            plot_L_sen[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_sen"])
+            plot_L_tol[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_tol"])
+            plot_L_both[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]), "survival_both"])
+      }
+
+      for (j in 1:length(unique(healthy_sims$N))) {
+            plot_N_sen[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_sen"])
+            plot_N_tol[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_tol"])
+            plot_N_both[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$N == unique(healthy_sims$N)[[j]]), "survival_both"])
+      }
+
+      for (j in 1:length(unique(healthy_sims$X))) {
+            plot_X_sen[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_sen"])
+            plot_X_tol[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_tol"])
+            plot_X_both[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$X == unique(healthy_sims$X)[[j]]), "survival_both"])
+      }
+
+      for (j in 1:length(unique(healthy_sims$kCO2))) {
+            plot_kCO2_sen[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[j]]), "survival_sen"])
+            plot_kCO2_tol[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[j]]), "survival_tol"])
+            plot_kCO2_both[[i, j]] <- mean(healthy_sims[(healthy_sims$initSH==unique(healthy_sims$initSH)[[i]]) & (healthy_sims$kCO2 == unique(healthy_sims$kCO2)[[j]]), "survival_both"])
+      }
+
+      plot_all_sen[[i]] <- mean(healthy_sims[healthy_sims$initSH==unique(healthy_sims$initSH)[[i]], "survival_sen"])
+      plot_all_tol[[i]] <- mean(healthy_sims[healthy_sims$initSH==unique(healthy_sims$initSH)[[i]], "survival_tol"])
+      plot_all_both[[i]] <- mean(healthy_sims[healthy_sims$initSH==unique(healthy_sims$initSH)[[i]], "survival_both"])
+}
+```
+
+```{r}
+par(mfrow=c(2,2))
+
+# Legend
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="% of simulations that\nequilibrate at\npositive host growth")
+legend("top", c("Sens. symb.", "Tol. symb.", "Both symb."), col=c("blue", "orange", "black"), pch=19)
+
+# Make the plots
+plot(unique(healthy_sims$initSH), plot_all_sen*100, type="l", col="blue",
+      xlab="Initial symbiont: host ratio", ylab="% survival", ylim=c(0, 100),
+      main="Survival vs. initial S:H ratio")
+lines(unique(healthy_sims$initSH), plot_all_tol*100, col="orange")
+lines(unique(healthy_sims$initSH), plot_all_both*100, col="black")
+
+
+plot(unique(healthy_sims$L), plot_L_sen[5,]*100, type="l", col="blue",
+      xlab="Light", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. Light\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[5]]))
+lines(unique(healthy_sims$L), plot_L_tol[5,]*100, col="orange")
+lines(unique(healthy_sims$L), plot_L_both[5,]*100, col="black")
+
+plot(unique(healthy_sims$L), plot_L_sen[9,]*100, type="l", col="blue",
+      xlab="Light", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. Light\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[9]]))
+lines(unique(healthy_sims$L), plot_L_tol[9,]*100, col="orange")
+lines(unique(healthy_sims$L), plot_L_both[9,]*100, col="black")
+
+plot(unique(healthy_sims$N), plot_N_sen[5,]*100, type="l", col="blue",
+      xlab="Nitrogen", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. Nitorgen\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[5]]))
+lines(unique(healthy_sims$N), plot_N_tol[5,]*100, col="orange")
+lines(unique(healthy_sims$N), plot_N_both[5,]*100, col="black")
+
+plot(unique(healthy_sims$N), plot_N_sen[9,]*100, type="l", col="blue",
+      xlab="Nitrogen", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. Nitrogen\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[9]]))
+lines(unique(healthy_sims$N), plot_N_tol[9,]*100, col="orange")
+lines(unique(healthy_sims$N), plot_N_both[9,]*100, col="black")
+
+plot(unique(healthy_sims$X), plot_X_sen[5,]*100, type="l", col="blue",
+      xlab="Food", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. Food\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[5]]))
+lines(unique(healthy_sims$X), plot_X_tol[5,]*100, col="orange")
+lines(unique(healthy_sims$X), plot_X_both[5,]*100, col="black")
+
+plot(unique(healthy_sims$X), plot_X_sen[9,]*100, type="l", col="blue",
+      xlab="Food", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. Food\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[9]]))
+lines(unique(healthy_sims$X), plot_X_tol[9,]*100, col="orange")
+lines(unique(healthy_sims$X), plot_X_both[9,]*100, col="black")
+
+plot(unique(healthy_sims$kCO2), plot_kCO2_sen[5,]*100, type="l", col="blue",
+      xlab="kCO2", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. kCO2\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[5]]))
+lines(unique(healthy_sims$kCO2), plot_kCO2_tol[5,]*100, col="orange")
+lines(unique(healthy_sims$kCO2), plot_kCO2_both[5,]*100, col="black")
+
+plot(unique(healthy_sims$kCO2), plot_kCO2_sen[9,]*100, type="l", col="blue",
+      xlab="kCO2", ylab="% survival", ylim=c(0, 100),
+      main=paste0("Survival vs. kCO2\nInitial symb.: host ratio = ", unique(healthy_sims$initSH)[[9]]))
+lines(unique(healthy_sims$kCO2), plot_kCO2_tol[9,]*100, col="orange")
+lines(unique(healthy_sims$kCO2), plot_kCO2_both[9,]*100, col="black")
+
+```
