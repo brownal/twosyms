@@ -19,6 +19,7 @@ library("RColorBrewer")
 library("viridis")
 library("factoextra")
 library("coda")
+library("knitr")
 options(repr.plot.res=240)
 ```
 ## A function for detecting when the host growth rate changes sign
@@ -50,7 +51,7 @@ equil_time <- seq(1, 1000, 0.1)
 # draw sets of parameter values randomly
 # hopefully this will speed things up compared to looking over a grid
 
-draws = 10000; # number of sets of random parameter combinations to look over
+draws = 30000; # number of sets of random parameter combinations to look over
 
 search_params <- data.frame(
                             # Environmental parameters
@@ -268,4 +269,239 @@ What percent of total simulations (in all parameter space) show rescue?
 
 ```{r}
 print(paste0(sum(rescue_tol_param$reason=="rescue")/nrow(rescue_tol_param) * 100,  "%"))
+```
+
+
+
+# How does the initial symbiont:host ratio affect the frequency of rescue?
+Let's try 10^-4 (we already have this), 10^-3, and 10^-5 to start with
+
+```{r}
+body(run_coral)
+
+# run simulations for 100 days to determine survival
+survival_time <-seq(1, 100, 0.1)
+
+# run simulations for 1000 days to determine equilibria (if coral survives)
+equil_time <- seq(1, 1000, 0.1)
+
+# draw sets of parameter values randomly
+# hopefully this will speed things up compared to looking over a grid
+
+draws = 30000; # number of sets of random parameter combinations to look over for each initial S:H ratio
+initSHlist = c(1e-3, 1e-4, 1e-5) # initial symbiont to host ratio to look over
+
+search_params <- data.frame(
+                            # Environmental parameters
+                            "L" = runif(draws*length(initSHlist), 0, 40),       # Light, choose values between 0 and 40
+                            "N" = runif(draws*length(initSHlist), 0, 4e-6),     # DIN, choose values between 0 and 4e-6
+                            "X" = runif(draws*length(initSHlist), 0, 4e-7),     # Food, choose values between 0 and 4e-7
+                            # Host parameter
+                            "kCO2" = runif(draws*length(initSHlist), 10, 50),   # Host carbon concentrating, choose values between 10 and 50
+                            # Tolerant symbiont parameters
+                            "kNPQ" = runif(draws*length(initSHlist), 112, 224), # Non-photochemical quenching, choose values between 112 and 124
+                            "astar" = runif(draws*length(initSHlist), 0.67, 1.34), # astar, choose values between 0.7 and 1.34
+                            "jSGm" = runif(draws*length(initSHlist), 0.15, 0.25), # Maximum growth rate, choose values between 0.15 and 0.25
+                            "jCPm" = runif(draws*length(initSHlist), 1, 2.8), # Maximum photosynthetic rate, choose values between 1 and 2.8
+                            "kROS" = runif(draws*length(initSHlist), 80, 250), # kROS, choose values between 80 and 250
+                            "b" = runif(draws*length(initSHlist), 1, 5),   # b, choose values between 1 and 5
+                            "initSH" = rep(initSHlist, each=draws)) # initial symbiont:host ratio, takes values given in initSHlist
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+      # one-symbiont parameters
+      pars1 <- coRal::def_pars(nsym=1)
+      pars1$initS <- search_params[i, "initSH"]
+
+      # initialize reason; will give the reason for lack of rescue if rescue does not occur
+      # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+      # reason = "T_dies" -> tolerant symbiont unable to rescue host
+      # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+      # reason = "rescue" -> rescue occurred
+      reason <- NA
+
+    # Set up the environmental conditions
+    survival_env <- coRal::init_env(time=survival_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    equil_env <- coRal::init_env(time=equil_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # Check if the sensitive symbiont can survive alone
+    run_1symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "S_lives"
+    }
+
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+         # two-symbiont parameters
+         pars2 <- coRal::def_pars(nsym=2)
+         pars2$kCO2 <- search_params[i, "kCO2"]
+         pars2$initS[1:2] <- c(0.5, 0.5) * search_params[i, "initSH"]
+         pars2$astar[2] <- search_params[i, "astar"]
+         pars2$kNPQ[2] <- search_params[i, "kNPQ"]
+         pars2$jSGm[2] <- search_params[i, "jSGm"]
+         pars2$jCPm[2] <- search_params[i, "jCPm"]
+         pars2$kROS[2] <- search_params[i, "kROS"]
+         pars2$b[2] <- search_params[i, "b"]
+
+
+
+        run_2symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=pars2)
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "T_dies"
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] <= 0) {
+             reason <- "T_dies"
+        }
+
+        # further investigate the case where host growth is positive at the end of the simulation
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+             # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
+             # To figure out if this happened, we need to actually run things to equilibrium
+             run_2symb_equil <- coRal::run_coral(time=equil_time, env=equil_env, pars=pars2)
+
+             # Check that the host and symbiont growth rates have equilibrated
+             tend <- length(equil_time)
+             dH <- abs(run_2symb_equil[tend - 1, "dH.Hdt"] -  run_2symb_equil[tend, "dH.Hdt"])
+             dS1 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.1"] -  run_2symb_equil[tend, "dS.Sdt.1"])
+             dS2 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.2"] -  run_2symb_equil[tend, "dS.Sdt.2"])
+             equilibrated <- ((dH <= 1e-5) & (dS1 <= 1e-5) & (dS2 <= 1e-5))
+
+             # if things have not equilibrated, we can't know the outcome; set reason to not_equil
+             if (equilibrated == FALSE) {
+                   reason <- "not_equil"
+             }
+
+             # if things have equilibrated and there is more tolerant that sensitive symbiont, set reason to "T_dominates"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] < run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "T_dominates"
+             }
+
+             # if things have equilibrated and there is more sensitive that tolerant symbiont, set reason to "rescue"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] > run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "rescue"
+             }
+
+             # if things have equilibrated to equal amounts of sensitive and tolerant symbiont (a) this is really weird and
+             # (b) set reason to "possible_coexist"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] == run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "possible_coexist"
+             }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"],
+    "astar"=search_params[i, "astar"], "kNPQ"=search_params[i, "kNPQ"],
+    "jSGm"=search_params[i, "jSGm"], "jCPm"=search_params[i, "jCPm"],
+    "kROS"=search_params[i, "kROS"], "b"=search_params[i, "b"],
+    "initSH"=search_params[i, "initSH"],
+    "reason"=reason)
+}
+
+stopCluster(cl) # stop the cluster
+
+# print time this took
+print("Simulation took")
+print(proc.time() - start)
+
+# store results in dataframe
+rescue_initSH <- data.frame(results, row.names=NULL)
+
+```
+
+## How does the overall prevalence of rescue change?
+
+```{r}
+kable(data.frame("initial_S:H"=c(1e-3, 1e-4, 1e-5), "rescue_percent"=c(
+      paste0(sum(rescue_initSH[rescue_initSH$initSH == 1e-3, ]$reason=="rescue")/nrow(rescue_initSH[rescue_initSH$initSH == 1e-3, ]) * 100,  "%"),
+      paste0(sum(rescue_initSH[rescue_initSH$initSH == 1e-4, ]$reason=="rescue")/nrow(rescue_initSH[rescue_initSH$initSH == 1e-4, ]) * 100,  "%"),
+      paste0(sum(rescue_initSH[rescue_initSH$initSH == 1e-5, ]$reason=="rescue")/nrow(rescue_initSH[rescue_initSH$initSH == 1e-5, ]) * 100,  "%"))),
+      col.names=c("Initial symbiont:host ratio", "prevalence of rescue (% of simulations)"))
+```
+
+```{r}
+par(mfrow=c(2,2))
+
+for (sh in c(1e-3, 1e-4, 1e-5)) {
+      initSHsims <- rescue_initSH[rescue_initSH$initSH == sh, ]
+
+      plot(initSHsims[(initSHsims$reason == "S_lives"), "L"], initSHsims[(initSHsims$reason == "S_lives"), "X"],
+             pch=1, col="#648FFF80",
+             xlab=expression(paste("Light (mol photons ", "m"^"-2", "d"^"-1", ")")),
+             ylab="Food (C-mol)",
+             main=paste0("Initial S:H ratio = ", sh),
+             xlim=c(0, 40), ylim=c(0e-7, 4e-7))
+
+       points(initSHsims[(initSHsims$reason == "T_dies"), "L"], initSHsims[(initSHsims$reason == "T_dies"), "X"],
+             pch=0, col=rgb(0, 0, 0, alpha=0.4))
+       points(initSHsims[(initSHsims$reason == "T_dominates"), "L"], initSHsims[(initSHsims$reason == "T_dominates"), "X"],
+             pch=19, col="#FFB000")
+      points(initSHsims[(initSHsims$reason == "rescue"), "L"], initSHsims[(initSHsims$reason == "rescue"), "X"],
+            pch=15, col="#DC267F")
+}
+
+      plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+      legend("top", c("No recovery", "Recovers w/ sensitive symbiont", "Recovers w/ tolerant symbiont", "Recovers w/ sens. in presence of tol."),
+            col=c(rgb(0, 0, 0), "#648FFF", "#FFB000", "#DC267F"), pch=c(0, 1, 19, 15), bg="white")
+```
+
+## How does the prevalence of rescue in a region where it's generally "high" change?
+Light 20 to 30 mol photons/(m^2 * d) and food 1e-7 to 2e-7 C-mol
+
+```{r}
+
+sims_in_region <- rescue_initSH[(rescue_initSH$L >= 20) & (rescue_initSH$L <= 30) & (rescue_initSH$X >= 1e-7) & (rescue_initSH$X <= 2e-7), ]
+
+kable(data.frame("initial_S:H"=c(1e-3, 1e-4, 1e-5), "rescue_percent"=c(
+      paste0(sum(sims_in_region[sims_in_region$initSH == 1e-3, ]$reason=="rescue")/nrow(sims_in_region[sims_in_region$initSH == 1e-3, ]) * 100,  "%"),
+      paste0(sum(sims_in_region[sims_in_region$initSH == 1e-4, ]$reason=="rescue")/nrow(sims_in_region[sims_in_region$initSH == 1e-4, ]) * 100,  "%"),
+      paste0(sum(sims_in_region[sims_in_region$initSH == 1e-5, ]$reason=="rescue")/nrow(sims_in_region[sims_in_region$initSH == 1e-5, ]) * 100,  "%"))),
+      col.names=c("Initial symbiont:host ratio", "prevalence of rescue (% of simulations)"))
+```
+
+```{r}
+par(mfrow=c(2,2))
+
+sims_in_region <- rescue_initSH[(rescue_initSH$L >= 20) & (rescue_initSH$L <= 30) & (rescue_initSH$X >= 1e-7) & (rescue_initSH$X <= 2e-7), ]
+
+for (sh in c(1e-3, 1e-4, 1e-5)) {
+      initSHsims <- sims_in_region[sims_in_region$initSH == sh, ]
+
+      plot(initSHsims[(initSHsims$reason == "S_lives"), "L"], initSHsims[(initSHsims$reason == "S_lives"), "X"],
+             pch=1, col="#648FFF80",
+             xlab=expression(paste("Light (mol photons ", "m"^"-2", "d"^"-1", ")")),
+             ylab="Food (C-mol)",
+             main=paste0("Initial S:H ratio = ", sh),
+             xlim=c(20, 30), ylim=c(1e-7, 2e-7))
+
+       points(initSHsims[(initSHsims$reason == "T_dies"), "L"], initSHsims[(initSHsims$reason == "T_dies"), "X"],
+             pch=0, col=rgb(0, 0, 0, alpha=0.4))
+       points(initSHsims[(initSHsims$reason == "T_dominates"), "L"], initSHsims[(initSHsims$reason == "T_dominates"), "X"],
+             pch=19, col="#FFB000")
+      points(initSHsims[(initSHsims$reason == "rescue"), "L"], initSHsims[(initSHsims$reason == "rescue"), "X"],
+            pch=15, col="#DC267F")
+}
+
+      plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+      legend("top", c("No recovery", "Recovers w/ sensitive symbiont", "Recovers w/ tolerant symbiont", "Recovers w/ sens. in presence of tol."),
+            col=c(rgb(0, 0, 0), "#648FFF", "#FFB000", "#DC267F"), pch=c(0, 1, 19, 15), bg="white")
 ```
