@@ -217,6 +217,7 @@ S_equil <- foreach(i=1:nrow(S_lives_cases), .combine='rbind', .packages='dplyr')
                              X=c(as.numeric(S_lives_cases[i, "X"]), as.numeric(S_lives_cases[i, "X"]), 0))
 
       pars1 <- coRal::def_pars(nsym=1)
+      pars1$kCO2 <- as.numeric(S_lives_cases[i, "kCO2"])
       pars1$initS <- 1e-4
 
       run_1symb <- coRal::run_coral(time=time, env=env, pars=pars1)
@@ -373,7 +374,7 @@ print(paste0(
 ## When the host recovers, what is the maximum S:H ratio ever reached (accounts for overshoot and equilibrating at a high S:H ratio)?
 Using simulation results from the first 600 days, assuming things have equilibrated by then (this will be checked below).
 
-```{r, cache=TRUE}
+```{r, cache=FALSE}
 par(mfrow=c(2, 2))
 hist(c(as.numeric(S_equil$max_SH), as.numeric(R_equil$max_SH), as.numeric(T_equil$max_SH)),
        main="All recovery outcomes", xlab="Maximum symbiont:host ratio (first 600 days)", ylab="Number of simulations")
@@ -387,7 +388,7 @@ hist(as.numeric(T_equil$max_SH),
 
 ## Check that 600 days is long enough for the S:H ratio to equilibrate
 
-```{r, cache=TRUE}
+```{r, cache=FALSE}
 par(mfrow=c(2,2))
 hist(c(as.numeric(S_equil$dSH), as.numeric(R_equil$dSH), as.numeric(T_equil$dSH)),
        main="Change in S:H ratio at end of 600-day simulation", xlab="Change in S:H ratio between time 599.9 and 600", ylab="Number of simulations")
