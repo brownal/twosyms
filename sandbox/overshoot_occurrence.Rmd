@@ -663,7 +663,7 @@ legend("topleft", c("Host growth\nrate\n", "Sensitive\nsymb:host ratio\n", "Tole
 ```{r, cache=FALSE}
 
 #png("example_plots.png", width=8, height=8, units="in", res=450)
-#pdf("example_plots.pdf", width=8, height=8)
+pdf("example_plots.pdf", width=8, height=8)
 
 par(mfrow=c(2, 2))
 
@@ -777,6 +777,154 @@ plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
 legend("center", c("Sens. symb (positive host growth)", "Sens. symb (negative host growth)", "Tol. symb (positive host growth)", "Tol. symb (negative host growth)"),
       col=c("#648FFF", "#648FFF", "#FFB000", "#FFB000"), lty=c("solid", "dashed", "solid", "dotted"), lwd=c(2, 2, 3, 3))
 
-#dev.off()
+dev.off()
+
+```
+
+
+
+#### More sample plots
+
+```{r, cache=FALSE}
+
+#png("example_plots_2env.png", width=8, height=8, units="in", res=450)
+pdf("example_plots_2env.pdf", width=8, height=8)
+
+par(xpd=NA)
+layout(matrix(c(5,6,1,2,7,8,3,4), 4, 2, byrow = TRUE), widths=c(4, 4), heights=c(0.5, 4, 0.5, 4))
+
+selected_sim <- S_equil[1097, ]
+
+print("S. lives parameter values")
+print(selected_sim)
+
+selected_env <- coRal::init_env(time=time,
+      L=c(as.numeric(selected_sim[1, "L"]), as.numeric(selected_sim[1, "L"]), 0),
+      N=c(as.numeric(selected_sim[1, "N"]), as.numeric(selected_sim[1, "N"]), 0),
+      X=c(as.numeric(selected_sim[1, "X"]), as.numeric(selected_sim[1, "X"]), 0))
+
+selected_pars <- coRal::def_pars(nsym=1)
+selected_pars$kCO2 <- as.numeric(selected_sim[1, "kCO2"])
+selected_pars$initS <- 1e-4
+
+selected_run <- coRal::run_coral(time=time, env=selected_env, pars=selected_pars)
+
+plot(time[time <= 200][-1], selected_run$S[time <= 200][-1]/selected_run$H[time <= 200][-1], col="#648FFF",
+      type="l", lty="dashed", lwd=2, ylim=c(0, 0.25), xlim=c(1, 200),
+      main=paste0("a. Recovery possible with sensitive symb."),
+      xlab="Time (days)", ylab="Symbiont:host ratio")
+
+lines(time[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      selected_run$S[(selected_run$dH.Hdt > 0) & (time <= 200)][-1]/selected_run$H[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      col="#648FFF", lwd=2)
+
+legend("top", c("Sens. symb (positive host growth)", "Sens. symb (negative host growth)", "Tol. symb (positive host growth)", "Tol. symb (negative host growth)"),
+      col=c("#648FFF", "#648FFF", "#FFB000", "#FFB000"), lty=c("solid", "dashed", "solid", "dotted"), lwd=c(2, 2, 3, 3))
+
+# Same simulation, now with tolerant symbiont present
+selected_pars <- coRal::def_pars(nsym=2)
+selected_pars$kCO2 <- as.numeric(selected_sim[1, "kCO2"])
+selected_pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+selected_pars$astar[2] <- as.numeric(selected_sim[1, "astar"])
+selected_pars$kNPQ[2] <- as.numeric(selected_sim[1, "kNPQ"])
+selected_pars$jSGm[2] <- as.numeric(selected_sim[1, "jSGm"])
+selected_pars$jCPm[2] <- as.numeric(selected_sim[1, "jCPm"])
+selected_pars$kROS[2] <- as.numeric(selected_sim[1, "kROS"])
+selected_pars$b[2] <- as.numeric(selected_sim[1, "b"])
+
+selected_run <- coRal::run_coral(time=time, env=selected_env, pars=selected_pars)
+
+plot(time[time <= 200][-1], selected_run$S.1[time <= 200][-1]/selected_run$H[time <= 200][-1], col="#648FFF",
+      type="l", lty="dashed", lwd=2, ylim=c(0, 0.25), xlim=c(1, 200),
+      main=paste0("b. Same environment as (a) \n Tolerant symb. dominates host if present"),
+      xlab="Time (days)", ylab="Symbiont:host ratio")
+
+lines(time[(selected_run$dH.Hdt > 0)  & (time <= 200)][-1],
+      selected_run$S.1[(selected_run$dH.Hdt > 0) & (time <= 200)][-1]/selected_run$H[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      col="#648FFF", lwd=2)
+
+lines(time[time <= 200][-1], selected_run$S.2[time <= 200][-1]/selected_run$H[time <= 200][-1],
+      col="#FFB000", lwd=3, lty="dotted")
+
+lines(time[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      selected_run$S.2[(selected_run$dH.Hdt > 0) & (time <= 200)][-1]/selected_run$H[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      col="#FFB000", lwd=3)
+
+rect(-400, -0.075, 400, 1, col = rgb(0,0,0,alpha=0.1), border=FALSE)
+
+
+
+# Rescue, case show host cannot recover with sensitive alone
+selected_sim <- R_equil[23, ]
+
+print("Rescue parameter values")
+print(selected_sim)
+
+selected_env <- coRal::init_env(time=time,
+      L=c(as.numeric(selected_sim[1, "L"]), as.numeric(selected_sim[1, "L"]), 0),
+      N=c(as.numeric(selected_sim[1, "N"]), as.numeric(selected_sim[1, "N"]), 0),
+      X=c(as.numeric(selected_sim[1, "X"]), as.numeric(selected_sim[1, "X"]), 0))
+
+
+selected_pars <- coRal::def_pars(nsym=1)
+selected_pars$kCO2 <- as.numeric(selected_sim[1, "kCO2"])
+selected_pars$initS <- 1e-4
+
+selected_run <- coRal::run_coral(time=time, env=selected_env, pars=selected_pars)
+
+plot(time[time <= 100][-1], selected_run$S[time <= 100][-1]/selected_run$H[time <= 100][-1], col="#648FFF",
+      type="l", lty="dashed", lwd=2, ylim=c(0, 0.25), xlim=c(1, 200),
+      main=paste0("c. No recovery with sensitive symb."),
+      xlab="Time (days)", ylab="Symbiont:host ratio")
+
+lines(time[(selected_run$dH.Hdt > 0) & (time <= 100)][-1],
+      selected_run$S[(selected_run$dH.Hdt > 0) & (time <= 100)][-1]/selected_run$H[(selected_run$dH.Hdt > 0) & (time <= 100)][-1],
+      col="#648FFF", lwd=2)
+
+arrows(x0=100, y0=0.2, x1=100, y1=selected_run$S[time==100]/selected_run$H[time==100], length=0.05)
+text(x=100, y=0.2, labels="Assumed death due to\nprolonged negative growth", pos=4)
+
+# Show recovery with tolerant symbiont
+
+selected_pars <- coRal::def_pars(nsym=2)
+selected_pars$kCO2 <- as.numeric(selected_sim[1, "kCO2"])
+selected_pars$initS[1:2] <- c(0.5e-4, 0.5e-4)
+selected_pars$astar[2] <- as.numeric(selected_sim[1, "astar"])
+selected_pars$kNPQ[2] <- as.numeric(selected_sim[1, "kNPQ"])
+selected_pars$jSGm[2] <- as.numeric(selected_sim[1, "jSGm"])
+selected_pars$jCPm[2] <- as.numeric(selected_sim[1, "jCPm"])
+selected_pars$kROS[2] <- as.numeric(selected_sim[1, "kROS"])
+selected_pars$b[2] <- as.numeric(selected_sim[1, "b"])
+
+selected_run <- coRal::run_coral(time=time, env=selected_env, pars=selected_pars)
+
+plot(time[time <= 200][-1], selected_run$S.1[time <= 200][-1]/selected_run$H[time <= 200][-1], col="#648FFF",
+      type="l", lty="dashed", lwd=2, ylim=c(0, 0.25), xlim=c(1, 200),
+      main=paste0("d. Same environment as (c)\nRecovery with sens. in presence of tol."),
+      xlab="Time (days)", ylab="Symbiont:host ratio")
+
+lines(time[(selected_run$dH.Hdt > 0)  & (time <= 200)][-1],
+      selected_run$S.1[(selected_run$dH.Hdt > 0) & (time <= 200)][-1]/selected_run$H[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      col="#648FFF", lwd=2)
+
+lines(time[time <= 200][-1], selected_run$S.2[time <= 200][-1]/selected_run$H[time <= 200][-1],
+      col="#FFB000", lwd=3, lty="dotted")
+
+lines(time[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      selected_run$S.2[(selected_run$dH.Hdt > 0) & (time <= 200)][-1]/selected_run$H[(selected_run$dH.Hdt > 0) & (time <= 200)][-1],
+      col="#FFB000", lwd=3)
+
+par(mar=c(0, 0, 2, 0))
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="Environment 1")
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="Environment 2")
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1)
+
+
+
+dev.off()
 
 ```
