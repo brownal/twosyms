@@ -439,7 +439,7 @@ print(paste0(round(sum(!(healthy_sims$survival_both) & (healthy_sims$survival_to
 ## Plot dominance for an example set of parameters
 
 ```{r}
-png("sample_dominance.png")
+#png("sample_dominance.png")
 par(mar=c(5.1, 4.1, 4.1, 6.1))
 plot_L_N <- matrix("?", nrow=length(unique(healthy_sims$N)), ncol=length(unique(healthy_sims$L)),
       dimnames=list(unique(healthy_sims$N), unique(healthy_sims$L)))
@@ -476,5 +476,52 @@ plot(plot_L_N[nrow(plot_L_N):1, 2:ncol(plot_L_N)],
       #breaks=seq(min(log(healthy_sims$tol_per_sen)), max(log(healthy_sims$tol_per_sen)), length.out=11), col=viridis(10), na.col="grey", key=NULL)
       col=c("#648FFF", "#FFB000", "white"), na.col="grey")
 
-dev.off()
+#dev.off()
+```
+
+## Plot dominance for a few food, kCO2 combinations
+
+```{r}
+par(mfrow=c(3, 3), mar=c(5.1, 4.1, 4.1, 6.1))
+
+for (x in c(8e-8, 2e-7, 3.2e-7)) {
+      for (kCO2 in c(10, 18, 26)) {
+            plot_L_N <- matrix("?", nrow=length(unique(healthy_sims$N)), ncol=length(unique(healthy_sims$L)),
+                  dimnames=list(unique(healthy_sims$N), unique(healthy_sims$L)))
+
+            # For each combination of environmental/host parameters, find the dominant symbiont
+            #
+
+            for (i in 1:length(unique(healthy_sims$N))) {
+                  for (j in 1:length(unique(healthy_sims$L))) {
+                        tol_per_sen <- healthy_sims[(healthy_sims$N == unique(healthy_sims$N)[[i]]) & (healthy_sims$L == unique(healthy_sims$L)[[j]]) &
+                              (healthy_sims$X == x) & (healthy_sims$kCO2 == kCO2) & healthy_sims$survival_both, "tol_per_sen"]
+
+                              if (length(tol_per_sen) == 0) {
+                                    plot_L_N[[i, j]] <- NA
+                              } else {
+
+                                    if (tol_per_sen > 1) {
+                                          plot_L_N[[i, j]] <- "Tolerant"
+                                    }
+
+                                    if (tol_per_sen < 1) {
+                                          plot_L_N[[i, j]] <- "Sensitive"
+                                    }
+
+                                    if (tol_per_sen == 1) {
+                                          plot_L_N[[i, j]] <- "Neither dominates"
+                                    }
+                              }
+                  }
+            }
+
+            plot(plot_L_N[nrow(plot_L_N):2, 2:ncol(plot_L_N)],
+                  xlab="Light", ylab="Nitrogen", main=paste0("Dominant symb when \n Food = ", x, ", kCO2 = ", kCO2),
+                  #breaks=seq(min(log(healthy_sims$tol_per_sen)), max(log(healthy_sims$tol_per_sen)), length.out=11), col=viridis(10), na.col="grey", key=NULL)
+                  col=c("#648FFF", "#FFB000", "white"), na.col="grey")
+
+      }
+}
+
 ```
