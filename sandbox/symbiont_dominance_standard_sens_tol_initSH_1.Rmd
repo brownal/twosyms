@@ -20,6 +20,7 @@ library("RColorBrewer")
 library("viridis")
 library("MASS")
 library("plot3D")
+library("adegenet")
 
 options(repr.plot.res=240)
 ```
@@ -576,10 +577,78 @@ pairs(mylda, type="trellis")
 mylda
 ```
 
+
+## Plot decision boundaries from linear discriminant analysis
+
 ```{r}
 
-scatter3D(healthy_sims$L, healthy_sims$N, healthy_sims$X, colvar=as.numeric(healthy_sims$dominant_symb), xlab="Light", ylab="Nitrogen", zlab="Food", main="Distribution of outcomes")
-print("key:")
-print(data.frame(vals=levels(healthy_sims$dominant_symb), colors=c("blue", "green", "red")))
+lightPts <- seq(min(healthy_sims$L), max(healthy_sims$L), length.out=300)
+nitrogenPts <- seq(min(healthy_sims$N), max(healthy_sims$N), length.out=300)
+#foodPts <- seq(min(healthy_sims$X), max(healthy_sims$X), length.out=300)
 
+par(mfrow=c(4, 3), mar=c(5.1, 4.1, 4.1, 6.1))
+palette(c("black", "#648FFF", "#FFB000", "green"))
+
+for (x in unique(healthy_sims$X)) {
+      combinedPts <- expand.grid(L=lightPts, N=nitrogenPts, X=x)
+      pred_factor <- predict(mylda, newdata =combinedPts)$class
+      pred <- as.numeric(pred_factor)
+
+      #print(levels(pred_factor))
+      #plot(combinedPts$L, combinedPts$N, col=pred)
+
+      plot(healthy_sims[healthy_sims$X==x, "L"], healthy_sims[healthy_sims$X==x, "N"], col = healthy_sims[healthy_sims$X==x, "dominant_symb"],
+            xlab="Light", ylab="Nitrogen", main=paste0("Food = ", x))
+      #points(mylda$means[, "L"], mylda$means[, "N"], pch = "+", cex = 3, col = c("#648FFF", "#FFB000", "black"))
+
+      contour(x = lightPts, y = nitrogenPts, z = matrix(pred, nrow = 300, ncol = 300),
+        levels = c(1, 2, 3), add = TRUE, drawlabels = FALSE)
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="'Healthy' host dominated by...")
+legend("top", c("Sensitive symb.", "Tolerant symb.", "Host cannot survive"), col=c("#648FFF", "#FFB000", "black"), pch=1)
+
+#plot(combinedPts$L, combinedPts$N, col=pred)
+
+```
+
+```{r}
+
+lightPts <- seq(min(healthy_sims$L), max(healthy_sims$L), length.out=300)
+#nitrogenPts <- seq(min(healthy_sims$N), max(healthy_sims$N), length.out=300)
+foodPts <- seq(min(healthy_sims$X), max(healthy_sims$X), length.out=300)
+
+par(mfrow=c(4, 3), mar=c(5.1, 4.1, 4.1, 6.1))
+palette(c("black", "#648FFF", "#FFB000", "green"))
+
+for (N in unique(healthy_sims$N)) {
+      combinedPts <- expand.grid(L=lightPts, N=N, X=foodPts)
+      pred_factor <- predict(mylda, newdata =combinedPts)$class
+      pred <- as.numeric(pred_factor)
+
+      #print(levels(pred_factor))
+      #plot(combinedPts$L, combinedPts$N, col=pred)
+
+      plot(healthy_sims[healthy_sims$N==N, "L"], healthy_sims[healthy_sims$N==N, "X"], col = healthy_sims[healthy_sims$N==N, "dominant_symb"],
+            xlab="Light", ylab="Food", main=paste0("Nitrogen = ", N))
+      #points(mylda$means[, "L"], mylda$means[, "N"], pch = "+", cex = 3, col = c("#648FFF", "#FFB000", "black"))
+
+      contour(x = lightPts, y = foodPts, z = matrix(pred, nrow = 300, ncol = 300),
+        levels = c(1, 2, 3), add = TRUE, drawlabels = FALSE)
+}
+
+plot(NULL, xaxt='n',yaxt='n',bty='n',ylab='',xlab='', xlim=0:1, ylim=0:1, main="'Healthy' host dominated by...")
+legend("top", c("Sensitive symb.", "Tolerant symb.", "Host cannot survive"), col=c("#648FFF", "#FFB000", "black"), pch=1)
+
+#plot(combinedPts$L, combinedPts$N, col=pred)
+
+```
+
+
+# Trying DAPC
+
+```{r}
+mydapc <- dapc(healthy_sims[, c("L", "N", "X")], grp=healthy_sims$dominant_symb, var.contrib=TRUE, scale = TRUE, n.pca = 3, n.da = 2)
+scatter(mydapc, cell = 0, pch = 18:23, cstar = 0, mstree = TRUE, lwd = 2, lty = 2, axesell=TRUE)
+summary(mydapc)
 ```
