@@ -565,7 +565,10 @@ healthy_sims$dominant_symb <- as.factor(dominant_symb)
 ```
 
 ```{r}
-mylda <- lda(dominant_symb ~ L + N + X, healthy_sims, tol=1e-8)
+
+lda_sims <- healthy_sims[(healthy_sims$L > 0) & (healthy_sims$N > 0), ]
+
+mylda <- lda(dominant_symb ~ L + N + X, lda_sims, tol=1e-8)
 
 ```
 
@@ -582,14 +585,14 @@ mylda
 
 ```{r}
 
-lightPts <- seq(min(healthy_sims$L), max(healthy_sims$L), length.out=300)
-nitrogenPts <- seq(min(healthy_sims$N), max(healthy_sims$N), length.out=300)
-#foodPts <- seq(min(healthy_sims$X), max(healthy_sims$X), length.out=300)
+lightPts <- seq(min(lda_sims$L), max(lda_sims$L), length.out=300)
+nitrogenPts <- seq(min(lda_sims$N), max(lda_sims$N), length.out=300)
+#foodPts <- seq(min(lda_sims$X), max(lda_sims$X), length.out=300)
 
 par(mfrow=c(4, 3), mar=c(5.1, 4.1, 4.1, 6.1))
 palette(c("black", "#648FFF", "#FFB000", "green"))
 
-for (x in unique(healthy_sims$X)) {
+for (x in unique(lda_sims$X)) {
       combinedPts <- expand.grid(L=lightPts, N=nitrogenPts, X=x)
       pred_factor <- predict(mylda, newdata =combinedPts)$class
       pred <- as.numeric(pred_factor)
@@ -597,7 +600,7 @@ for (x in unique(healthy_sims$X)) {
       #print(levels(pred_factor))
       #plot(combinedPts$L, combinedPts$N, col=pred)
 
-      plot(healthy_sims[healthy_sims$X==x, "L"], healthy_sims[healthy_sims$X==x, "N"], col = healthy_sims[healthy_sims$X==x, "dominant_symb"],
+      plot(lda_sims[lda_sims$X==x, "L"], lda_sims[lda_sims$X==x, "N"], col = lda_sims[lda_sims$X==x, "dominant_symb"],
             xlab="Light", ylab="Nitrogen", main=paste0("Food = ", x))
       #points(mylda$means[, "L"], mylda$means[, "N"], pch = "+", cex = 3, col = c("#648FFF", "#FFB000", "black"))
 
@@ -614,14 +617,14 @@ legend("top", c("Sensitive symb.", "Tolerant symb.", "Host cannot survive"), col
 
 ```{r}
 
-lightPts <- seq(min(healthy_sims$L), max(healthy_sims$L), length.out=300)
-#nitrogenPts <- seq(min(healthy_sims$N), max(healthy_sims$N), length.out=300)
-foodPts <- seq(min(healthy_sims$X), max(healthy_sims$X), length.out=300)
+lightPts <- seq(min(lda_sims$L), max(lda_sims$L), length.out=300)
+#nitrogenPts <- seq(min(lda_sims$N), max(lda_sims$N), length.out=300)
+foodPts <- seq(min(lda_sims$X), max(lda_sims$X), length.out=300)
 
 par(mfrow=c(4, 3), mar=c(5.1, 4.1, 4.1, 6.1))
 palette(c("black", "#648FFF", "#FFB000", "green"))
 
-for (N in unique(healthy_sims$N)) {
+for (N in unique(lda_sims$N)) {
       combinedPts <- expand.grid(L=lightPts, N=N, X=foodPts)
       pred_factor <- predict(mylda, newdata =combinedPts)$class
       pred <- as.numeric(pred_factor)
@@ -629,7 +632,7 @@ for (N in unique(healthy_sims$N)) {
       #print(levels(pred_factor))
       #plot(combinedPts$L, combinedPts$N, col=pred)
 
-      plot(healthy_sims[healthy_sims$N==N, "L"], healthy_sims[healthy_sims$N==N, "X"], col = healthy_sims[healthy_sims$N==N, "dominant_symb"],
+      plot(lda_sims[lda_sims$N==N, "L"], lda_sims[lda_sims$N==N, "X"], col = lda_sims[lda_sims$N==N, "dominant_symb"],
             xlab="Light", ylab="Food", main=paste0("Nitrogen = ", N))
       #points(mylda$means[, "L"], mylda$means[, "N"], pch = "+", cex = 3, col = c("#648FFF", "#FFB000", "black"))
 
@@ -648,7 +651,21 @@ legend("top", c("Sensitive symb.", "Tolerant symb.", "Host cannot survive"), col
 # Trying DAPC
 
 ```{r}
-mydapc <- dapc(healthy_sims[, c("L", "N", "X")], grp=healthy_sims$dominant_symb, var.contrib=TRUE, scale = TRUE, n.pca = 3, n.da = 2)
-scatter(mydapc, cell = 0, pch = 18:23, cstar = 0, mstree = TRUE, lwd = 2, lty = 2, axesell=TRUE)
+dapc_sims <- healthy_sims[(healthy_sims$L > 0) & (healthy_sims$N > 0), ]
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X")], grp=dapc_sims$dominant_symb, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 3, n.da = 2)
+scatter(mydapc, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE, col=c("#000000", "#648FFF", "#FFB000"), pch=c(0, 1, 19))
+arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
+text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
+text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
+text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
 summary(mydapc)
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+nrow(mydapc$tab)
+nrow(dapc_sims)
+mydapc
 ```
