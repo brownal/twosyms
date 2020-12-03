@@ -589,8 +589,8 @@ legend("top", c("Sensitive symb.", "Tolerant symb.", "Host cannot survive"), col
 
 # Trying DAPC
 
-```{r}
-dapc_sims <- healthy_sims[(healthy_sims$L > 0) & (healthy_sims$N > 0), ]
+```{r, cache=TRUE}
+dapc_sims <- healthy_sims[(healthy_sims$L > 0) & (healthy_sims$N > 0) & (healthy_sims$X > 0), ]
 
 mydapc <- dapc(dapc_sims[, c("L", "N", "X", "kCO2")], grp=dapc_sims$dominant_symb, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
 scatter(mydapc, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE, col=c("#000000", "#648FFF", "#FFB000"), pch=c(0, 1, 19))
@@ -614,7 +614,7 @@ mydapc
 
 Find subclusters of the outcomes?
 
-```{r}
+```{r, cache=TRUE}
 # Find subclusters of no survival and tolerant-dominant cases
 NS_clust <- find.clusters(dapc_sims[dapc_sims$dominant_symb=="No_survival", c("L", "X", "N", "kCO2")], n.clust=3, n.pca=3)$grp
 
@@ -650,23 +650,24 @@ Plot DAPC with subgroups
 ```{r}
 
 scatter(mydapc_clust, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE,
-      col=c("#000000", "#000000", "#000000", "#648FFF", "#FFB000", "#FFB000", "#FFB000"), pch=c(0, 7, 15, 2, 1, 10, 16))
-arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
-text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
-arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
-text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
-arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
-text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
-arrows(x0=0, y0=0, x1=mydapc$var.load[4,1], y1=mydapc$var.load[4,2])
-text(x=mydapc$var.load[4,1]/2, y=mydapc$var.load[4,2]/2, labels="KCO2", pos=4)
+      col=c("#000000", "#000000", "#648FFF", "#FFB000", "#FFB000"), pch=c(0, 7, 2, 1, 16))
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[1,1], y1=mydapc_clust$var.load[1,2])
+text(x=mydapc_clust$var.load[1,1]/2, y=mydapc_clust$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[2,1], y1=mydapc_clust$var.load[2,2])
+text(x=mydapc_clust$var.load[2,1]/1, y=mydapc_clust$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[3,1], y1=mydapc_clust$var.load[3,2])
+text(x=mydapc_clust$var.load[3,1]/2, y=mydapc_clust$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[4,1], y1=mydapc_clust$var.load[4,2])
+text(x=mydapc_clust$var.load[4,1]/2, y=mydapc_clust$var.load[4,2]/2, labels="KCO2", pos=4)
 summary(mydapc_clust)
+
 
 ```
 
 
 Try DAPC with two subgroups for No survival and Tolerant-dominated host
 
-```{r}
+```{r, cache=TRUE}
 
 # Find subclusters of no survival and tolerant-dominant cases
 NS_clust <- find.clusters(dapc_sims[dapc_sims$dominant_symb=="No_survival", c("L", "X", "N", "kCO2")], n.clust=2, n.pca=3)$grp
@@ -687,30 +688,236 @@ mydapc_clust <- dapc(dapc_sims_clust[, c("L", "N", "X", "kCO2")], grp=dapc_sims_
 
 ```
 
-Subclusters
+No survival subclusters
 
 ```{r}
 # plot the subclusters
-print("No survival subclusters")
-plot(dapc_sims[dapc_sims$dominant_symb=="No_survival", c("L", "X", "N", "kCO2")], col="black", pch=c(0, 15)[NS_clust])
+par(mfrow=c(3,3))
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "L"]), jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "N"]) , col="black", pch=c(0, 15)[NS_clust], xlab="L", ylab="N")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "L"]), jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "X"]) , col="black", pch=c(0, 15)[NS_clust], xlab="L", ylab="X")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "L"]), jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "kCO2"]) , col="black", pch=c(0, 15)[NS_clust], xlab="L", ylab="kCO2")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "N"]), jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "X"]) , col="black", pch=c(0, 15)[NS_clust], xlab="N", ylab="X")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "N"]), jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "kCO2"]) , col="black", pch=c(0, 15)[NS_clust], xlab="N", ylab="kCO2")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "X"]), jitter(dapc_sims[dapc_sims$dominant_symb=="No_survival", "kCO2"]) , col="black", pch=c(0, 15)[NS_clust], xlab="X", ylab="kCO2")
 
-print("Tolerant symb. dominates hosts subclusters")
-plot(dapc_sims[dapc_sims$dominant_symb=="Tolerant", c("L", "X", "N", "kCO2")], col="#FFB000", pch=c(1, 16)[T_clust])
+```
+
+Tolerant symb. dominates hosts subclusters
+
+```{r}
+
+par(mfrow=c(3,3))
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "L"]), jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "N"]) , col=c("#0000FF", "#FFB000")[T_clust], pch=c(16, 16)[T_clust], xlab="L", ylab="N")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "L"]), jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "X"]) , col=c("#0000FF", "#FFB000")[T_clust], pch=c(16, 16)[T_clust], xlab="L", ylab="X")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "L"]), jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "kCO2"]) , col=c("#0000FF", "#FFB000")[T_clust], pch=c(16, 16)[T_clust], xlab="L", ylab="kCO2")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "N"]), jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "X"]) , col=c("#0000FF", "#FFB000")[T_clust], pch=c(16, 16)[T_clust], xlab="N", ylab="X")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "N"]), jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "kCO2"]) ,col=c("#0000FF", "#FFB000")[T_clust], pch=c(16, 16)[T_clust], xlab="N", ylab="kCO2")
+plot(jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "X"]), jitter(dapc_sims[dapc_sims$dominant_symb=="Tolerant", "kCO2"]) , col=c("#0000FF", "#FFB000")[T_clust], pch=c(16, 16)[T_clust], xlab="X", ylab="kCO2")
+
+
 
 ```
 
 ```{r}
 scatter(mydapc_clust, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE,
       col=c("#000000", "#000000", "#648FFF", "#FFB000", "#FFB000"), pch=c(0, 7, 2, 1, 16))
-arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
-text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
-arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
-text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
-arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
-text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
-arrows(x0=0, y0=0, x1=mydapc$var.load[4,1], y1=mydapc$var.load[4,2])
-text(x=mydapc$var.load[4,1]/2, y=mydapc$var.load[4,2]/2, labels="KCO2", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[1,1], y1=mydapc_clust$var.load[1,2])
+text(x=mydapc_clust$var.load[1,1]/2, y=mydapc_clust$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[2,1], y1=mydapc_clust$var.load[2,2])
+text(x=mydapc_clust$var.load[2,1]/1, y=mydapc_clust$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[3,1], y1=mydapc_clust$var.load[3,2])
+text(x=mydapc_clust$var.load[3,1]/2, y=mydapc_clust$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_clust$var.load[4,1], y1=mydapc_clust$var.load[4,2])
+text(x=mydapc_clust$var.load[4,1]/2, y=mydapc_clust$var.load[4,2]/2, labels="KCO2", pos=4)
 summary(mydapc_clust)
 
 
+```
+
+## DAPC with sensitive-dominant cases thinned
+
+```{r, cache=TRUE}
+
+ dapc_sens <- dapc_sims[dapc_sims$dominant_symb=="Sensitive",]
+#
+ dapc_thinned <- dapc_sims[(dapc_sims$dominant_symb == "No_survival") |  (dapc_sims$dominant_symb == "Tolerant"),]
+
+ dapc_thinned <- rbind(dapc_thinned, dapc_sens[sample(1:nrow(dapc_sens), 2000),])
+
+ mydapc_thinned <- dapc(dapc_thinned[, c("L", "N", "X", "kCO2")], grp=dapc_thinned$dominant_symb, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
+
+```
+
+```{r}
+scatter(mydapc_thinned, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE,
+      col=c("#000000", "#648FFF", "#FFB000"), pch=c(0, 2, 16))
+arrows(x0=0, y0=0, x1=mydapc_thinned$var.load[1,1], y1=mydapc_thinned$var.load[1,2])
+text(x=mydapc_thinned$var.load[1,1]/2, y=mydapc_thinned$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc_thinned$var.load[2,1], y1=mydapc_thinned$var.load[2,2])
+text(x=mydapc_thinned$var.load[2,1]/1, y=mydapc_thinned$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_thinned$var.load[3,1], y1=mydapc_thinned$var.load[3,2])
+text(x=mydapc_thinned$var.load[3,1]/2, y=mydapc_thinned$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc_thinned$var.load[4,1], y1=mydapc_thinned$var.load[4,2])
+text(x=mydapc_thinned$var.load[4,1]/2, y=mydapc_thinned$var.load[4,2]/2, labels="KCO2", pos=4)
+summary(mydapc_thinned)
+```
+
+## What are those 4 tolerant points all by themselves?
+
+```{r}
+
+tol_grp <- mydapc_thinned$ind.coord[(mydapc_thinned$grp=="Tolerant") &
+	(mydapc_thinned$ind.coord[,1] < 0),]
+
+plot(mydapc_thinned$ind.coord[,1], mydapc_thinned$ind.coord[,2],
+	col=c(NA, NA, "orange")[mydapc_thinned$grp],
+	main="Host dominated by tolerant symb.",
+	xlab = "LDA axis 1", ylab="LDA axis 2")
+
+points(tol_grp[,1], tol_grp[,2], col="red", pch=16)
+
+print(dapc_thinned[rownames(tol_grp), c("L", "N", "X", "kCO2")])
+
+```
+
+
+## "Thicken" the area around the 4 tolerant points (investigate more points there)
+
+```{r, cache=TRUE}
+
+# Code for run_coral, so we can make sure the updated version was used
+body(coRal::run_coral)
+
+# run simulations for 600 days
+time<-seq(1, 600, 0.1)
+
+extra_search_params <- expand.grid("L"=40,       # Light = 40
+                            "N"=seq(3e-6, 3.9e-6, length.out=11),     # DIN
+                            "X" = seq(3.2e-7, 3.6e-7, length.out=11),     # Food
+                            "kCO2" = 10)    
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+extra_results <- foreach(i=1:nrow(extra_search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(extra_search_params[i, "L"], extra_search_params[i, "L"], 0),
+                           N=c(extra_search_params[i, "N"], extra_search_params[i, "N"], 0), X=c(extra_search_params[i, "X"], extra_search_params[i, "X"], 0))
+
+
+    # Simulations!
+    # simulate dynamics with just the sensitive symbiont
+    run_sen <- coRal::run_coral(time=time, env=env, pars=replace(pars_sen, "kCO2", extra_search_params[i, "kCO2"]))
+
+    # simulate dynamics with just the tolerant symbiont
+    run_tol <- coRal::run_coral(time=time, env=env, pars=replace(pars_tol, "kCO2", extra_search_params[i, "kCO2"]))
+
+    # simulate dynamics with both symbionts
+    run_both <- coRal::run_coral(time=time, env=env, pars=replace(pars_both, "kCO2", extra_search_params[i, "kCO2"]))
+
+
+    # Process simulations to get summary statistics
+
+    # 1. Convergence: have the host and symbiont growth rates stabilized? (Changed by no more than 10^-6 between the last and penultimate time steps)
+    # 1a. Simulation with sensitive symbiont alone
+    converge_sen_H <- (abs(run_sen$dH.Hdt[length(time)] - run_sen$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_sen_S <- (abs(run_sen$dS.Sdt[length(time)] - run_sen$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_sen <- converge_sen_H & converge_sen_S
+
+    # 1b. Simulation with tolerant symbiont alone
+    converge_tol_H <- (abs(run_tol$dH.Hdt[length(time)] - run_tol$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_tol_S <- (abs(run_tol$dS.Sdt[length(time)] - run_tol$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_tol <- converge_tol_H & converge_tol_S
+
+    # 1c. Simulation with both symbionts
+    converge_both_H <- (abs(run_both$dH.Hdt[length(time)] - run_both$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_both_S1 <- (abs(run_both$dS.Sdt.1[length(time)] - run_both$dS.Sdt.1[length(time)-1]) <= 1e-6)
+    converge_both_S2 <- (abs(run_both$dS.Sdt.2[length(time)] - run_both$dS.Sdt.2[length(time)-1]) <= 1e-6)
+    converge_both <- converge_both_H & (converge_both_S1 & converge_both_S2)
+
+    # 2. Survival: does the coral have positive growth at the end of the simulation?
+    survival_sen <- run_sen$dH.Hdt[length(time)] > 0
+    survival_tol <- run_tol$dH.Hdt[length(time)] > 0
+    survival_both <- run_both$dH.Hdt[length(time)] > 0
+
+    # 3. Dominance: when both symbionts are present, what is the sensitive:tolerant symbiont ratio?
+    tol_per_sen = run_both$S.2[length(time)]/run_both$S.1[length(time)]
+
+    # 4. Symbiont: host ratio
+    sh_ratio_sen = run_sen$S[length(time)]/run_sen$H[length(time)]
+    sh_ratio_tol = run_tol$S[length(time)]/run_tol$H[length(time)]
+    sh_ratio_both = (run_both$S.1[length(time)] + run_both$S.2[length(time)])/run_both$H[length(time)]
+
+    # 5. Host growth rate
+    host_growth_sen = run_sen$dH.Hdt[length(time)]
+    host_growth_tol = run_tol$dH.Hdt[length(time)]
+    host_growth_both = run_both$dH.Hdt[length(time)]
+
+    # return the parameters and summary statistics
+    list("L"=extra_search_params[i, "L"], "N"=extra_search_params[i, "N"], "X"=extra_search_params[i, "X"],
+    "kCO2"=extra_search_params[i, "kCO2"],
+    "converge_sen"=converge_sen, "converge_tol"=converge_tol, "converge_both"=converge_both,
+    "survival_sen"=survival_sen, "survival_tol"=survival_tol, "survival_both"=survival_both,
+    "tol_per_sen"=tol_per_sen,
+    "sh_ratio_sen"=sh_ratio_sen, "sh_ratio_tol"=sh_ratio_tol, "sh_ratio_both"=sh_ratio_both,
+    "host_growth_sen"=host_growth_sen, "host_growth_tol"=host_growth_tol, "host_growth_both"=host_growth_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+extra_healthy_sims <- data.frame(extra_results, row.names=NULL)
+```
+
+```{r}
+# set the columns to their proper types
+extra_healthy_sims <- transform(extra_healthy_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+      converge_sen=as.logical(converge_sen), converge_tol=as.logical(converge_tol), converge_both=as.logical(converge_both),
+      survival_sen=as.logical(survival_sen), survival_tol=as.logical(survival_tol), survival_both=as.logical(survival_both),
+      tol_per_sen=as.numeric(tol_per_sen),
+      sh_ratio_sen=as.numeric(sh_ratio_sen), sh_ratio_tol=as.numeric(sh_ratio_tol), sh_ratio_both=as.numeric(sh_ratio_both),
+      host_growth_sen=as.numeric(host_growth_sen), host_growth_tol=as.numeric(host_growth_tol), host_growth_both=as.numeric(host_growth_both))
+```
+
+```{r}
+
+dominant_symb <- rep(NA, times=nrow(extra_healthy_sims))
+
+for (i in 1:nrow(extra_healthy_sims)) {
+      survival_both <- extra_healthy_sims[i, "survival_both"]
+      tol_per_sen <- extra_healthy_sims[i, "tol_per_sen"]
+
+      if (survival_both) {
+            if (tol_per_sen > 1) {
+                  dominant_symb[[i]] <- "Tolerant"
+            }
+
+            if (tol_per_sen < 1) {
+                  dominant_symb[[i]] <- "Sensitive"
+            }
+
+            if (tol_per_sen == 1) {
+                  dominant_symb[[i]] <- "Co-dominant"
+            }
+      } else {
+            dominant_symb[[i]] <- "No_survival"
+      }
+}
+
+extra_healthy_sims$dominant_symb <- as.factor(dominant_symb)
+
+```
+
+
+```{r}
+
+plot(extra_healthy_sims$N, extra_healthy_sims$X, col=c("orange", "blue")[extra_healthy_sims$dominant_symb], pch=as.character(extra_healthy_sims$dominant_symb))
+summary(extra_healthy_sims)
 ```
