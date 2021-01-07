@@ -1,0 +1,99 @@
+---
+title: "Host recovery from bleaching: When are tolerant symbionts required?"
+author: "Ross Cunning and Alexandra Brown"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+library("MASS")
+library("plot3D")
+library("adegenet")
+
+options(repr.plot.res=240)
+
+# Load the multisymbiont version of run_coral_ss
+source("../../coRal2/R/run_coral_ss.R")
+```
+
+# Simulations
+
+## Simulate steady-state conditions before bleaching
+
+```{r}
+# Initialize symbiont parameters
+pars <- def_pars(nsym=2)
+pars$jCPm[2] <- 1.0 # tolerant symbiont (symbiont 2) has lower max. photosynthetic rate
+pars$kROS[2] <- 250 # tolerant symbiont experiences slower rise in ROS per unit of excess light
+pars$jSGm[2] <- 0.15 # tolerant symbiont has lower max. growth rate
+pars$initS[1:2] <- c(0.5, 0.5) # initialize symbionts at equal frequencies
+
+
+# Range of environmental parameters and host trait (kCO2) to be investigated
+param_space <- expand.grid("L"=seq(5, 40, length.out=8),  # Light
+  "N"=c(1e-7, seq(4e-6, 4e-5, length.out=10)),  # DIN
+  "X" = seq(4e-8, 4e-7, length.out=10), # Food
+  "kCO2" = seq(10, 40, length.out=7)) # Host CCM efficiency
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# Find the pre-bleaching steady state
+pre_bleach <- foreach(i=1:nrow(param_space), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # simulate coral dynamics until steady state is reached
+  sim <- run_coral_ss(env=list(L=param_space[i, "L"], N=param_space[i, "N"], X=param_space[i, "X"]),
+    pars=replace(pars, "kCO2", param_space[i, "kCO2"]))
+
+  # extract steady states
+  grH <- sim$H$dH.Hdt[length(sim$H$dH.Hdt)] # host growth rate
+  sh_sen <- sim$S[[1]]$S[length(sim$S[[1]]$S)]/sim$H$H[length(sim$H$H)] # sensitive symbiont:host ratio
+  sh_tol <- sim$S[[2]]$S[length(sim$S[[2]]$S)]/sim$H$H[length(sim$H$H)] # tolerant symbiont:host ratio
+
+  # categorize pre-bleaching state
+  state <- NA
+  if(grH > 0) {
+    if (sh_sen > sh_tol) {
+      state <- "sensitive" # coral is alive & dominated by sensitive symbionts
+    } else if (sh_sen < sh_tol) {
+      state <- "tolerant" # coral is alive & dominated by tolerant symbionts
+    } else {
+      state <- "both" # coral is alive & has equal fractions of both symbionts
+    }
+  } else {
+    state <- "dead" # coral is dead (host growth rate is negative)
+  }
+
+  # return the parameters and steady states
+  list("L"=param_space[i, "L"], "N"=param_space[i, "N"], "X"=param_space[i, "X"], "kCO2"=param_space[i, "kCO2"],
+    "grH"=grH, "sh_sen"=sh_sen, "sh_tol"=sh_tol, "state"=state)
+}
+stopCluster(cl)
+
+# store results in dataframe
+pre_bleach <- data.frame(pre_bleach, row.names=NULL)
+pre_bleach <- transform(pre_bleach, "L"= as.numeric(L), "N"=as.numeric(N), "kCO2"=as.numeric(kCO2),
+  "grH"=as.numeric(grH), "sh_sen"=as.numeric(sh_sen), "sh_tol"=as.numeric(sh_tol),
+  "state"=as.factor(state))
+```
+
+
+## Simulate bleaching (light shock) and recovery
+
+
+# Analysis
+
+## DAPC of recovery outcomes
