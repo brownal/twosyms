@@ -1,0 +1,510 @@
+---
+title: "How much tolerant symbiont is needed for rescue?"
+author: "Ross Cunning and Alexandra Brown"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r setup}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+library("MASS")
+library("plot3D")
+library("adegenet")
+
+options(repr.plot.res=240)
+
+# Load the new run_coral that takes fluxes as inputs
+source("../../coRal2/R/run_coral.R")
+```
+
+```{r detect-gr-fun, cache=TRUE}
+## A function for detecting when the host growth rate changes sign
+detect_gr_change <- function(run) {
+    prevGr <- run$dH.Hdt[1:length(run$dH.Hdt)-1]
+    currGr <- run$dH.Hdt[2:length(run$dH.Hdt)]
+    changelist <- ((run$time[2:length(run$time)] + run$time[1:length(run$time)-1])/2)[prevGr*currGr<= 0]
+    if (length(changelist) > 0) {
+          return(changelist[length(changelist)])
+   }
+   return(NA)
+}
+```
+
+```{r, shock-fun, cache=TRUE}
+# shock takes a simulation of a healthy host and introduces a brief environmental shock, followed by recovery
+# Input
+# - healthy_run: a run_coral simulation
+# - pars: the parameters used in healthy_run
+# - shock_env: the light, nitrogen and food levels during the environmental shock; list of the form (L=light, N=nitrogen, X=food)
+# - recovery_env: light, nitrogen, and food levels after the environmental shock; same form as shock_env
+# - start_time: the time in healthy_run at which the environmental shock should occur
+# - shock_duration: how long the environmental shock lasts for
+# - recovery_duration: how long the host should spend in the recovery environment post-shock
+# - dt: time step for run_coral
+# Output
+# - a run_coral simulation that beings at start_time + dt and simulates shock and recovery
+shock <- function(healthy_run, pars, shock_env, recovery_env, start_time, shock_duration, recovery_duration, dt=0.1) {
+	# Time to run simulation over
+	time <- seq(start_time + dt, start_time + shock_duration + recovery_duration, dt)
+
+	# Environmental conditions
+	env <- list(
+		L=c(rep(shock_env$L, length(seq(dt, shock_duration, dt))), rep(recovery_env$L, length(seq(dt, recovery_duration, dt)))),
+		N=c(rep(shock_env$N, length(seq(dt, shock_duration, dt))), rep(recovery_env$N, length(seq(dt, recovery_duration, dt)))),
+		X=c(rep(shock_env$X, length(seq(dt, shock_duration, dt))), rep(recovery_env$X, length(seq(dt, recovery_duration, dt)))))
+
+  # Get initial fluxes
+  start_time_index <- (1:length(healthy_run$time))[healthy_run$time == start_time]
+	pre_fluxes <- lapply(healthy_run, function(x) {x[[start_time_index]]})
+
+	# Initial symbiont and host biomasses
+	pre_pars <- pars
+	pre_pars$initH <- healthy_run$H[[start_time_index]]
+	pre_pars$initS <- unlist(lapply(healthy_run[grep(paste0("^S", "\\.[[:digit:]]*"), names(healthy_run))],
+		function(x) { x[[start_time_index]] }))
+
+	# Run simulation
+	run <- run_coral(time=time, env=env, pars=pre_pars,
+		fluxes=pre_fluxes)
+
+	return(run)
+}
+```
+
+```{r time-fun, cache=TRUE}
+# time_t.s finds the time that the tolerant:sensitive ratio first reaches or drops below a value of interest
+time_t.s <- function(run, ratio) {
+	run$time[diff(run$S.2/run$S.1 > ratio) != 0]
+}
+
+# time_t.h finds the time that the tolerant:host ratio first drops below a value of interest
+time_t.h <- function(run, ratio) {
+	run$time[diff(run$S.2/run$H > ratio) != 0]
+}
+```
+
+```{r plot-symbs-fun, cache=TRUE}
+# plot_symbs makes plots of S:H ratios for simulations with two symbionts
+# Negative host growth shown with dashed line for S:H ratio
+plot_symbs <- function(run, col1, col2, new_plot=FALSE, ...) {
+if(new_plot){
+plot(run$time, run$S.1/run$H, lwd=2, lty=2, col=col1, type="l",
+	xlab="Time (days)", ylab="Symbiont:host ratio",...)
+} else {
+lines(run$time, run$S.1/run$H, lwd=2, lty=2, col=col1)
+}
+
+diff(run$dH.Hdt > 0) == -1
+lines(run$time[(run$dH.Hdt > 0)],
+	run$S.1[(run$dH.Hdt > 0)]/run$H[(run$dH.Hdt > 0)], lwd=2, col=col1)
+
+lines(run$time, run$S.2/run$H, lwd=2, lty=2, col=col2)
+lines(run$time[(run$dH.Hdt > 0)],
+	run$S.2[(run$dH.Hdt > 0)]/run$H[(run$dH.Hdt > 0)], lwd=2, col=col2)
+}
+```
+
+# Find some environmental conditions under which rescue can occur
+
+```{r rescue-search, cache=TRUE}
+# one-symbiont parameters
+pars1 <- def_pars(nsym=1)
+pars1$initS <- 1e-4
+
+# two-symbiont parameters
+pars2 <- coRal::def_pars(nsym=2)
+pars2$jCPm[2] <- 1.0 # tolerant symbiont (symbiont 2) has lower max. photosynthetic rate
+pars2$kROS[2] <- 250 # tolerant symbiont experiences slower rise in ROS per unit of excess light
+pars2$jSGm[2] <- 0.15 # tolerant symbiont has lower max. growth rate
+pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+# run simulations for 100 days to determine survival
+survival_time <-seq(1, 100, 0.1)
+
+# run simulations for 600 days to determine equilibria (if coral survives)
+equil_time <- seq(1, 1000, 0.1)
+
+draws = 10000; # number of sets of random parameter combinations to look over
+
+# parameters to search over
+search_params <- data.frame(
+                            # Environmental parameters
+                            "L" = runif(draws, 15, 40),       # Light, choose values between 15 and 40 (where rescue appears to be most likely)
+                            "N" = runif(draws, 0, 4e-6),     # DIN, choose values between 0 and 4e-6
+                            "X" = runif(draws, 0, 3e-7))     # Food, choose values between 0 and 3e-7
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+      # initialize reason; will give the reason for lack of rescue if rescue does not occur
+      # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+      # reason = "T_dies" -> tolerant symbiont unable to rescue host
+      # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+      # reason = "rescue" -> rescue occurred
+      reason <- NA
+
+    # Set up the environmental conditions
+    survival_env <- coRal::init_env(time=survival_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    equil_env <- coRal::init_env(time=equil_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # Check if the sensitive symbiont can survive alone
+    run_1symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=pars1)
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "S_lives"
+    }
+
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+        run_2symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=pars2)
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "T_dies"
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] <= 0) {
+             reason <- "T_dies"
+        }
+
+        # further investigate the case where host growth is positive at the end of the simulation
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+             # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
+             # To figure out if this happened, we need to actually run things to equilibrium
+             run_2symb_equil <- coRal::run_coral(time=equil_time, env=equil_env, pars=pars2)
+
+             # Check that the host and symbiont growth rates have equilibrated
+             tend <- length(equil_time)
+             dH <- abs(run_2symb_equil[tend - 1, "dH.Hdt"] -  run_2symb_equil[tend, "dH.Hdt"])
+             dS1 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.1"] -  run_2symb_equil[tend, "dS.Sdt.1"])
+             dS2 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.2"] -  run_2symb_equil[tend, "dS.Sdt.2"])
+             equilibrated <- ((dH <= 1e-5) & (dS1 <= 1e-5) & (dS2 <= 1e-5))
+
+             # if things have not equilibrated, we can't know the outcome; set reason to not_equil
+             if (equilibrated == FALSE) {
+                   reason <- "not_equil"
+             }
+
+             # if things have equilibrated and there is more tolerant that sensitive symbiont, set reason to "T_dominates"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] < run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "T_dominates"
+             }
+
+             # if things have equilibrated and there is more sensitive that tolerant symbiont, set reason to "rescue"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] > run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "rescue"
+             }
+
+             # if things have equilibrated to equal amounts of sensitive and tolerant symbiont (a) this is really weird and
+             # (b) set reason to "possible_coexist"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] == run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "possible_coexist"
+             }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "reason"=reason)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+rescue_search <- data.frame(results, row.names=NULL)
+save(rescue_search, file="rescue_search.RData")
+
+```
+
+
+```{r rescue-findings, cache=FALSE}
+rescue_env <- rescue_search[rescue_search$reason == "rescue", c("L", "N", "X")]
+print("Environmental conditions in which rescue occurs")
+print(rescue_env)
+```
+
+```{r, cache=TRUE}
+pars <- def_pars(nsym=2)
+pars$kROS[[2]] <- 250
+pars$jCPm[[2]] <- 1
+pars$jSGm[[2]] <- 0.15
+pars$initS <- c(0.00001, 0.2)
+
+
+time <- seq(0, 1000, 0.1)
+
+shock_duration <- 20
+recovery_duration <- 400
+shock_light <- 50
+
+env <- list(L=rep(rescue_env$L[[1]], length(time)), N=rep(rescue_env$N[[1]], length(time)), X=rep(rescue_env$X[[1]], length(time)))
+
+healthy_run <- run_coral(time=time, env=env, pars=pars)
+
+plot_symbs(healthy_run, "#648FFF", "#FFB000", TRUE)
+
+title(main=paste0("Environment: L = ", round(rescue_env$L[[1]], 0), ", N = ", round(rescue_env$N[[1]], 7), ", X = ", round(rescue_env$X[[1]], 8)))
+
+legend("topright", c("sens. symb, positive gr.", "tol. symb, positive gr.",
+	"sens. symb, negative gr.", "tol. symb, negative gr."),
+	col=c("#648FFF", "#FFB000"), lwd=2, lty=c(1, 1, 2, 2))
+
+
+# Okay now let's find some time points!
+bleaching_start_times <- lapply(c(10, 2, 1, 0.5, 0.25, 0.1, 0.01, 0.001, 0.0001), function(x) { time_t.s(healthy_run, x)})
+
+par(mfrow=c(3, 3))
+for(i in 1:9) {
+  run <- shock(healthy_run, pars, list(L=shock_light, N=rescue_env$N[[1]], X=rescue_env$X[[1]]), list(L=rescue_env$L[[1]], N=rescue_env$N[[1]], X=rescue_env$X[[1]]),
+    bleaching_start_times[[i]], shock_duration, recovery_duration)
+  plot_symbs(lapply(healthy_run, function(x) {x[1:bleaching_start_times[[i]]/0.1]}), "#648FFF", "#FFB000", TRUE,
+    xlim=c(0, bleaching_start_times[[i]] + shock_duration + recovery_duration), ylim=c(0, 1))
+  plot_symbs(lapply(run, function(x) {x[1:shock_duration/0.1]}), "#648FFF", "#FFB000")
+  plot_symbs(lapply(run, function(x) {x[(shock_duration/0.1+1):length(x)]}), "#648FFF", "#FFB000")
+  rect(xleft=bleaching_start_times[[i]], ybottom=-0.2, xright=bleaching_start_times[[i]] + shock_duration, ytop=1.4,
+  	col="#FFFF0040", border=NA)
+}
+
+```
+
+
+```{r recovery-threshold-fun, cache=TRUE}
+# Okay: so I want to find the sens:tol ratio at which tolerant changes from "allows recovery" to "does not allow recovery"
+# I know that the sens:tol ratio at which rescue occurred was 1 in the original simulation, and also that there were 0.5e-4 tolerant symbionts per host then
+
+recovery_threshold_t.s <- function(healthy_run, pars, shock_env, recovery_env, shock_duration, recovery_duration, dt=0.1) {
+
+  # Input check: check the T:S ratio in healthy_run is decreasing monotonically
+  if(sum(diff(healthy_run$S.2/healthy_run$S.1) < 0) != (length(healthy_run$time) - 1)) {
+    warning("T:S ratio not decreasing monotonically in healthy_run")
+    return(NA)
+  }
+
+  # Step 1: find the lowest T:S got in healthy_run, ts_min, and the time at which it occurs, time_ts_min
+  ts_min <- min(healthy_run$S.2/healthy_run$S.1)
+  time_ts_min <- time_t.s(healthy_run, ts_min)
+
+
+  # Step 2: find the highest T:S got in healthy_run ts_max, and the time at which it occurs, time_ts_max
+  ts_max <- max(healthy_run$S.2/healthy_run$S.1)
+
+  if(healthy_run$S.2[[1]]/healthy_run$S.1[[1]] == ts_max) {
+    time_ts_max <- healthy_run$time[[1]]
+  } else {
+    time_ts_max <- time_t.s(healthy_run, ts_max)
+  }
+
+  # Step 3: check if positive growth occurs post-shock for ts_min and ts_max
+  shock_ts_min <- shock(healthy_run, pars, shock_env, recovery_env, time_ts_min, shock_duration, recovery_duration, dt)
+  shock_ts_max <- shock(healthy_run, pars, shock_env, recovery_env, time_ts_max, shock_duration, recovery_duration, dt)
+
+  recovery_ts_min <- (shock_ts_min$dH.Hdt[[length(shock_ts_min$dH.Hdt)]] > 0)
+  recovery_ts_max <- (shock_ts_max$dH.Hdt[[length(shock_ts_max$dH.Hdt)]] > 0)
+
+  # Step 4: we need to see negative growth at ts_min and positive growth at ts_max in order to find an intermediate
+  # T:S that approximates the T:S ratio at which rescue is no longer possible
+  if(recovery_ts_min | !(recovery_ts_max)) {
+    if(recovery_ts_min & recovery_ts_max) {
+      warning("Minimum T:S: Host is able to recover to positive growth at minimum tolerant:sensitive ratio in healthy_run")
+      return(Inf)
+    } else if(!(recovery_ts_min) & !(recovery_ts_max)) {
+      warning("Maximum T:S: Host is not able to recover to positive growth at maximum tolerant:sensitive ratio in healthy_run")
+      return(-1)
+    } else {
+      warning("Min & Max T:S: Host recovers to positive growth at minimum tolerant:sensitive ratio in healthy_run but not at maximum tolerant:sensitive ratio")
+      return(NA)
+    }
+    #return(NA)
+  }
+
+  # Step 5: narrow the possible region where we know the transition from T:S being high enough to allow rescue
+  # to being too low to allow rescue must occur. (We'll call the point of transition ts_star for ease of commenting)
+  while(ts_max - ts_min >= 2*dt) {
+    # a. find the T:S intermediate between ts_min and ts_max, ts_mid, and the time at which it occurs, time_ts_mid
+    ts_mid <- (ts_min + ts_max)/2
+    time_ts_mid <- time_t.s(healthy_run, ts_mid)
+
+    # b. check if positive growth occurs post-shock for ts_mid
+    shock_ts_mid <- shock(healthy_run, pars, shock_env, recovery_env, time_ts_mid, shock_duration, recovery_duration, dt)
+    recovery_ts_mid <- shock_ts_mid$dH.Hdt[[length(shock_ts_mid$dH.Hdt)]] > 0
+
+    # c. if positive growth occurs at ts_mid, ts_star must be between ts_mid and ts_min --> set ts_max to ts_mid
+    if(recovery_ts_mid) {
+      ts_max <- ts_mid
+    } else {
+    # d. if positive growth does not occur at ts_mid, ts_star must be between ts_max and ts_mid --> set ts_min to ts_mid
+      ts_min <- ts_mid
+    }
+  }
+
+  # Step 6: ts_max and ts_min are now close enough that anywhere between them would be a pretty good approximation for
+  # ts_star. So we'll return ts_mid = (ts_max + ts_min)/2 as an approximation of ts_star
+  ts_mid <- (ts_min + ts_max)/2
+  return(ts_mid)
+}
+```
+
+
+```{r find-recovery-threshold}
+
+pars <- def_pars(nsym=2)
+pars$kROS[[2]] <- 250
+pars$jCPm[[2]] <- 1
+pars$jSGm[[2]] <- 0.15
+pars$initS <- c(0.1, 0.1)
+
+
+time <- seq(0, 2000, 0.1)
+
+shock_duration <- 10
+recovery_duration <- 90
+shock_light <- 80
+
+thresholds <- rep(NA, length(rescue_env$L))
+
+for (i in 1:length(rescue_env$L)) {
+  env <- list(L=rep(rescue_env$L[[i]], length(time)), N=rep(rescue_env$N[[i]], length(time)), X=rep(rescue_env$X[[i]], length(time)))
+
+  healthy_run <- run_coral(time=time, env=env, pars=pars)
+  healthy_run <- lapply(healthy_run, function(x) {x[time > 20]})
+
+  shock_env <-  list(L=shock_light, N=rescue_env$N[[i]], X=rescue_env$X[[i]])
+  recovery_env <- list(L=rescue_env$L[[i]], N=rescue_env$N[[i]], X=rescue_env$X[[i]])
+
+  thresholds[[i]] <- recovery_threshold_t.s(healthy_run, pars, shock_env, recovery_env, shock_duration, recovery_duration)
+}
+
+threshold_df <- data.frame(L=unlist(rescue_env$L), N=unlist(rescue_env$N), X=unlist(rescue_env$X), threshold=unlist(thresholds), shock_light=rep(shock_light, length(rescue_env$L)),
+  shock_duration=rep(shock_duration, length(rescue_env$L)))
+
+rownames(threshold_df) <- c()
+
+
+shock_duration <- 15
+recovery_duration <- 85
+shock_light <- 80
+
+thresholds <- rep(NA, length(rescue_env$L))
+
+for (i in 1:length(rescue_env$L)) {
+  env <- list(L=rep(rescue_env$L[[i]], length(time)), N=rep(rescue_env$N[[i]], length(time)), X=rep(rescue_env$X[[i]], length(time)))
+
+  healthy_run <- run_coral(time=time, env=env, pars=pars)
+  healthy_run <- lapply(healthy_run, function(x) {x[time > 20]})
+
+  shock_env <-  list(L=shock_light, N=rescue_env$N[[i]], X=rescue_env$X[[i]])
+  recovery_env <- list(L=rescue_env$L[[i]], N=rescue_env$N[[i]], X=rescue_env$X[[i]])
+
+  thresholds[[i]] <- recovery_threshold_t.s(healthy_run, pars, shock_env, recovery_env, shock_duration, recovery_duration)
+}
+
+threshold_df_tmp <- data.frame(L=unlist(rescue_env$L), N=unlist(rescue_env$N), X=unlist(rescue_env$X), threshold=unlist(thresholds), shock_light=rep(shock_light, length(rescue_env$L)),
+  shock_duration=rep(shock_duration, length(rescue_env$L)))
+
+threshold_df <- rbind(threshold_df, threshold_df_tmp)
+
+rownames(threshold_df) <- c()
+
+
+
+shock_duration <- 30
+recovery_duration <- 70
+shock_light <- 80
+
+thresholds <- rep(NA, length(rescue_env$L))
+
+for (i in 1:length(rescue_env$L)) {
+  env <- list(L=rep(rescue_env$L[[i]], length(time)), N=rep(rescue_env$N[[i]], length(time)), X=rep(rescue_env$X[[i]], length(time)))
+
+  healthy_run <- run_coral(time=time, env=env, pars=pars)
+  healthy_run <- lapply(healthy_run, function(x) {x[time > 20]})
+
+  shock_env <-  list(L=shock_light, N=rescue_env$N[[i]], X=rescue_env$X[[i]])
+  recovery_env <- list(L=rescue_env$L[[i]], N=rescue_env$N[[i]], X=rescue_env$X[[i]])
+
+  thresholds[[i]] <- recovery_threshold_t.s(healthy_run, pars, shock_env, recovery_env, shock_duration, recovery_duration)
+}
+
+threshold_df_tmp <- data.frame(L=unlist(rescue_env$L), N=unlist(rescue_env$N), X=unlist(rescue_env$X), threshold=unlist(thresholds), shock_light=rep(shock_light, length(rescue_env$L)),
+  shock_duration=rep(shock_duration, length(rescue_env$L)))
+
+threshold_df <- rbind(threshold_df, threshold_df_tmp)
+
+rownames(threshold_df) <- c()
+
+print(signif(threshold_df, 2))
+
+```
+
+
+```{r}
+
+pars <- def_pars(nsym=2)
+pars$kROS[[2]] <- 250
+pars$jCPm[[2]] <- 1
+pars$jSGm[[2]] <- 0.15
+pars$initS <- c(0.1, 0.1)
+
+
+time <- seq(0, 2000, 0.1)
+
+shock_duration <- 10
+recovery_duration <- 90
+shock_light <- 80
+
+
+env <- list(L=rep(rescue_env$L[[15]], length(time)), N=rep(rescue_env$N[[15]], length(time)), X=rep(rescue_env$X[[15]], length(time)))
+
+healthy_run <- run_coral(time=time, env=env, pars=pars)
+
+par(mfrow=c(2, 2))
+
+plot_symbs(healthy_run, "#648FFF", "#FFB000", TRUE)
+
+#title(main=paste0("Environment: L = ", round(rescue_env$L[[1]], 0), ", N = ", round(rescue_env$N[[1]], 7), ", X = ", round(rescue_env$X[[1]], 8)))
+
+legend("topright", c("sens. symb, positive gr.", "tol. symb, positive gr.",
+	"sens. symb, negative gr.", "tol. symb, negative gr."),
+	col=c("#648FFF", "#FFB000"), lwd=2, lty=c(1, 1, 2, 2))
+
+
+bleaching_start_time <- time_t.s(healthy_run, 0.05)
+
+shock_duration <- c(10, 30)
+
+
+for(i in 1:2) {
+  run <- shock(healthy_run, pars, list(L=shock_light, N=rescue_env$N[[15]], X=rescue_env$X[[15]]), list(L=rescue_env$L[[15]], N=rescue_env$N[[15]], X=rescue_env$X[[15]]),
+    bleaching_start_time, shock_duration[[i]], 100-shock_duration[[i]])
+  plot_symbs(lapply(healthy_run, function(x) {x[1:bleaching_start_time/0.1]}), "#648FFF", "#FFB000", TRUE,
+    xlim=c(0, bleaching_start_time + 100), ylim=c(0, 1))
+  plot_symbs(lapply(run, function(x) {x[1:shock_duration[[i]]/0.1]}), "#648FFF", "#FFB000")
+  plot_symbs(lapply(run, function(x) {x[(shock_duration[[i]]/0.1+1):length(x)]}), "#648FFF", "#FFB000")
+  rect(xleft=bleaching_start_time, ybottom=-0.2, xright=bleaching_start_time + shock_duration[[i]], ytop=1.4,
+  	col="#FFFF0040", border=NA)
+}
+```
