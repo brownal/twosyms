@@ -803,6 +803,22 @@ text(x=rand_mydapc_thinned$var.load[4,1], y=rand_mydapc_thinned$var.load[4,2], l
 summary(rand_mydapc_thinned)
 ```
 
+
+```{r}
+pdf("healthy_host.pdf")
+scatter(rand_mydapc_thinned, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE,
+      col=c("#000000", "#648FFF", "#FFB000"), pch=c(0, 2, 16))
+arrows(x0=0, y0=0, x1=rand_mydapc_thinned$var.load[1,1], y1=rand_mydapc_thinned$var.load[1,2])
+text(x=rand_mydapc_thinned$var.load[1,1], y=rand_mydapc_thinned$var.load[1,2], labels="Light", pos=1)
+arrows(x0=0, y0=0, x1=rand_mydapc_thinned$var.load[2,1], y1=rand_mydapc_thinned$var.load[2,2])
+text(x=rand_mydapc_thinned$var.load[2,1], y=rand_mydapc_thinned$var.load[2,2], labels="Nitrogen", pos=1)
+arrows(x0=0, y0=0, x1=rand_mydapc_thinned$var.load[3,1], y1=rand_mydapc_thinned$var.load[3,2])
+text(x=rand_mydapc_thinned$var.load[3,1], y=rand_mydapc_thinned$var.load[3,2], labels="Food", pos=2)
+arrows(x0=0, y0=0, x1=rand_mydapc_thinned$var.load[4,1], y1=rand_mydapc_thinned$var.load[4,2])
+text(x=rand_mydapc_thinned$var.load[4,1], y=rand_mydapc_thinned$var.load[4,2], labels="KCO2", pos=3)
+dev.off()
+```
+
 ## What are those 4 tolerant points all by themselves?
 
 ```{r}
