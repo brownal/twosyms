@@ -1,0 +1,227 @@
+---
+title: "How much tolerant symbiont is needed for rescue?"
+author: "Ross Cunning and Alexandra Brown"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r setup}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+library("MASS")
+library("plot3D")
+library("adegenet")
+
+options(repr.plot.res=240)
+
+```
+
+
+# Check different N and X values for
+
+```{r rescue-search, cache=TRUE}
+# one-symbiont parameters
+pars1 <- def_pars(nsym=1)
+pars1$nNX <- 0 # food contains no nitrogen
+pars1$initS <- 1e-4
+
+# two-symbiont parameters
+pars2 <- coRal::def_pars(nsym=2)
+pars2$nNX <- 0 # food contains no nitrogen
+pars2$jCPm[2] <- 1.0 # tolerant symbiont (symbiont 2) has lower max. photosynthetic rate
+pars2$kROS[2] <- 250 # tolerant symbiont experiences slower rise in ROS per unit of excess light
+pars2$jSGm[2] <- 0.15 # tolerant symbiont has lower max. growth rate
+pars2$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+# run simulations for 100 days to determine survival
+survival_time <-seq(0, 100, 0.1)
+
+# run simulations for 1000 days to determine equilibria (if coral survives)
+equil_time <- seq(0, 1000, 0.1)
+
+draws = 100000; # number of sets of random parameter combinations to look over
+
+# parameters to search over
+search_params <- data.frame(
+                            # Environmental parameters
+                            "L" = runif(draws, 15, 40),       # Light, choose values between 15 and 40 (where rescue appears to be most likely)
+                            "N" = runif(draws, 0, 4e-5),     # DIN, choose values between 0 and 4e-6
+                            "X" = runif(draws, 0, 2e-2),     # Food, choose values between 0 and 3e-7
+                            "kCO2" = 10)   # kCO2, choose values between 10 and 40
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+      # initialize reason; will give the reason for lack of rescue if rescue does not occur
+      # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+      # reason = "T_dies" -> tolerant symbiont unable to rescue host
+      # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+      # reason = "rescue" -> rescue occurred
+      reason <- NA
+
+      #initialize the maximum symbiont:host ratios
+      SHmax_1symb <- NA # one-symbiont case
+      SHmax_2symb <- NA # two-symbiont case; not calculated if recovery is possible with sensitive alone
+
+    # Set up the environmental conditions
+    survival_env <- coRal::init_env(time=survival_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    equil_env <- coRal::init_env(time=equil_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # Check if the sensitive symbiont can survive alone
+    run_1symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars1, "kCO2", search_params[i, "kCO2"]))
+
+    # Calculate the 1-symbiont maximum symbiont:host ratio
+    SHmax_1symb <- max(run_1symb$S/run_1symb$H)
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "S_lives"
+    }
+
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+        run_2symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars2, "kCO2", search_params[i, "kCO2"]))
+
+        # Calculate 2-symbiont maximum symbiont:host ratio
+        SHmax_2symb <- max((run_2symb$S.1 + run_2symb$S.2)/run_2symb$H)
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "T_dies"
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] <= 0) {
+             reason <- "T_dies"
+        }
+
+        # further investigate the case where host growth is positive at the end of the simulation
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+             # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
+             # To figure out if this happened, we need to actually run things to equilibrium
+             run_2symb_equil <- coRal::run_coral(time=equil_time, env=equil_env, pars=pars2)
+
+             # Check that the host and symbiont growth rates have equilibrated
+             tend <- length(equil_time)
+             dH <- abs(run_2symb_equil[tend - 1, "dH.Hdt"] -  run_2symb_equil[tend, "dH.Hdt"])
+             dS1 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.1"] -  run_2symb_equil[tend, "dS.Sdt.1"])
+             dS2 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.2"] -  run_2symb_equil[tend, "dS.Sdt.2"])
+             equilibrated <- ((dH <= 1e-5) & (dS1 <= 1e-5) & (dS2 <= 1e-5))
+
+             # if things have not equilibrated, we can't know the outcome; set reason to not_equil
+             if (equilibrated == FALSE) {
+                   reason <- "not_equil"
+             }
+
+             # if things have equilibrated and there is more tolerant that sensitive symbiont, set reason to "T_dominates"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] < run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "T_dominates"
+             }
+
+             # if things have equilibrated and there is more sensitive that tolerant symbiont, set reason to "rescue"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] > run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "rescue"
+             }
+
+             # if things have equilibrated to equal amounts of sensitive and tolerant symbiont (a) this is really weird and
+             # (b) set reason to "possible_coexist"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] == run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "possible_coexist"
+             }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"], "reason"=reason,
+    "SHmax_1symb"=SHmax_1symb, "SHmax_2symb"=SHmax_2symb)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+doc_sims <- data.frame(results, row.names=NULL)
+#save(rescue_search, file="rescue_search.RData")
+
+```
+
+
+```{r outcomes}
+
+sum(doc_sims$reason=="S_lives")/nrow(doc_sims)
+sum(doc_sims$reason=="T_dominates")/nrow(doc_sims)
+sum(doc_sims$reason=="rescue")/nrow(doc_sims)
+sum(doc_sims$reason=="T_dies")/nrow(doc_sims)
+
+plot(as.numeric(doc_sims$SHmax_1symb) ~ as.numeric(doc_sims$X), col="#0000FF20", xlab="DOC", ylab="max S:H ratio (1st 100 days)")
+
+
+# plot(doc_sims$L[doc_sims$reason=="S_lives"], doc_sims$N[doc_sims$reason=="S_lives"], col="#648FFF80", pch=1)
+# points(doc_sims$L[doc_sims$reason=="T_dies"], doc_sims$N[doc_sims$reason=="T_dies"], col=rgb(0, 0, 0, alpha=0.4), pch=0)
+# points(doc_sims$L[doc_sims$reason=="T_dominates"], doc_sims$N[doc_sims$reason=="T_dominates"], col="#FFB000", pch=19)
+# points(doc_sims$L[doc_sims$reason=="rescue"], doc_sims$N[doc_sims$reason=="rescue"], col="#DC267F", pch=15)
+
+
+```
+
+# For how many parameter values are hosts able to survive in the dark with no symbionts?
+
+```{r host-alone, cache=TRUE}
+
+pars0 <- def_pars(nsym=1)
+pars0$nNX <- 0 # food contains no nitrogen
+pars0$initS <- 0
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    survival_env <- coRal::init_env(time=survival_time, L=c(0, 0, 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # Check if the sensitive symbiont can survive alone
+    run_1symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars0, "kCO2", search_params[i, "kCO2"]))
+
+    dark_survival <- (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0)
+    H <- run_1symb$H[length(run_1symb$H)]
+    S <- run_1symb$S[length(run_1symb$S)]
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=0, "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"],
+    "dark_survival"=dark_survival, "H"=H, "S"=S)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+dark_sims <- data.frame(results, row.names=NULL)
+```
+
+```{r}
+
+sum(dark_sims$dark_survival == TRUE, na.rm=TRUE)/nrow(dark_sims)
+
+```
