@@ -1,0 +1,693 @@
+---
+title: "DOC and healthy hosts: How does dissolved organic carbon affect which symbiont dominates a healthy host?"
+author: "Ross Cunning and Alexandra Brown"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r}
+#Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+library(coRal)
+library(foreach)
+library(parallel)
+library(doParallel)
+library(plot.matrix)
+library("RColorBrewer")
+library("viridis")
+library("MASS")
+library("plot3D")
+library("adegenet")
+
+options(repr.plot.res=240)
+```
+
+# Simulate healthy corals with sensitive and tolerant symbionts alone and together
+
+The goal is to find out
+
+1. When both symbionts are present, which one dominates the host?
+2. How does the presence of dissolved organic carbon affect this?
+
+
+## Set symbiont parameters
+
+```{r}
+# parameters for single-symbiont simulations
+# sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+pars_sen$initS <- 1
+
+# tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+pars_tol$initS <- 1
+
+# parameters for two-symbiont simulations
+# sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+pars_both$initS[1:2] <- c(0.5, 0.5)
+```
+
+
+## No DOC (beyond food) simulations
+
+```{r no-doc-sims, cache=TRUE}
+
+# run simulations for 600 days
+time<-seq(0, 600, 0.1)
+
+search_params <- data.frame("L"=runif(20000, 5, 40),       # Light, choose values between 5 and 40
+                            "N"=runif(20000, 1e-7, 6e-6),     # DIN, choose values between 0 and 6e-6
+                            "X" = runif(20000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "kCO2" = runif(20000, 10, 40))   # Host carbon-concentrating ability, choose values between 10 and 40
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+
+    # Simulations!
+    # simulate dynamics with just the sensitive symbiont
+    run_sen <- coRal::run_coral(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+
+    # simulate dynamics with just the tolerant symbiont
+    run_tol <- coRal::run_coral(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
+
+    # simulate dynamics with both symbionts
+    run_both <- coRal::run_coral(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+
+
+    # Process simulations to get summary statistics
+
+    # 1. Convergence: have the host and symbiont growth rates stabilized? (Changed by no more than 10^-6 between the last and penultimate time steps)
+    # 1a. Simulation with sensitive symbiont alone
+    converge_sen_H <- (abs(run_sen$dH.Hdt[length(time)] - run_sen$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_sen_S <- (abs(run_sen$dS.Sdt[length(time)] - run_sen$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_sen <- converge_sen_H & converge_sen_S
+
+    # 1b. Simulation with tolerant symbiont alone
+    converge_tol_H <- (abs(run_tol$dH.Hdt[length(time)] - run_tol$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_tol_S <- (abs(run_tol$dS.Sdt[length(time)] - run_tol$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_tol <- converge_tol_H & converge_tol_S
+
+    # 1c. Simulation with both symbionts
+    converge_both_H <- (abs(run_both$dH.Hdt[length(time)] - run_both$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_both_S1 <- (abs(run_both$dS.Sdt.1[length(time)] - run_both$dS.Sdt.1[length(time)-1]) <= 1e-6)
+    converge_both_S2 <- (abs(run_both$dS.Sdt.2[length(time)] - run_both$dS.Sdt.2[length(time)-1]) <= 1e-6)
+    converge_both <- converge_both_H & (converge_both_S1 & converge_both_S2)
+
+    # 2. Survival: does the coral have positive growth at the end of the simulation?
+    survival_sen <- run_sen$dH.Hdt[length(time)] > 0
+    survival_tol <- run_tol$dH.Hdt[length(time)] > 0
+    survival_both <- run_both$dH.Hdt[length(time)] > 0
+
+    # 3. Dominance: when both symbionts are present, what is the sensitive:tolerant symbiont ratio?
+    tol_per_sen = run_both$S.2[length(time)]/run_both$S.1[length(time)]
+
+    # 4. Symbiont: host ratio
+    sh_ratio_sen = run_sen$S[length(time)]/run_sen$H[length(time)]
+    sh_ratio_tol = run_tol$S[length(time)]/run_tol$H[length(time)]
+    sh_ratio_both = (run_both$S.1[length(time)] + run_both$S.2[length(time)])/run_both$H[length(time)]
+
+    # 5. Host growth rate
+    host_growth_sen = run_sen$dH.Hdt[length(time)]
+    host_growth_tol = run_tol$dH.Hdt[length(time)]
+    host_growth_both = run_both$dH.Hdt[length(time)]
+
+    # return the parameters and summary statistics
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
+    "kCO2"=search_params[i, "kCO2"],
+    "converge_sen"=converge_sen, "converge_tol"=converge_tol, "converge_both"=converge_both,
+    "survival_sen"=survival_sen, "survival_tol"=survival_tol, "survival_both"=survival_both,
+    "tol_per_sen"=tol_per_sen,
+    "sh_ratio_sen"=sh_ratio_sen, "sh_ratio_tol"=sh_ratio_tol, "sh_ratio_both"=sh_ratio_both,
+    "host_growth_sen"=host_growth_sen, "host_growth_tol"=host_growth_tol, "host_growth_both"=host_growth_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+no_doc_sims <- data.frame(results, row.names=NULL)
+```
+
+```{r no-doc-column-types}
+# set the columns to their proper types
+no_doc_sims <- transform(no_doc_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+      converge_sen=as.logical(converge_sen), converge_tol=as.logical(converge_tol), converge_both=as.logical(converge_both),
+      survival_sen=as.logical(survival_sen), survival_tol=as.logical(survival_tol), survival_both=as.logical(survival_both),
+      tol_per_sen=as.numeric(tol_per_sen),
+      sh_ratio_sen=as.numeric(sh_ratio_sen), sh_ratio_tol=as.numeric(sh_ratio_tol), sh_ratio_both=as.numeric(sh_ratio_both),
+      host_growth_sen=as.numeric(host_growth_sen), host_growth_tol=as.numeric(host_growth_tol), host_growth_both=as.numeric(host_growth_both))
+```
+
+
+```{r no-doc-dominant-symb}
+
+dominant_symb <- rep(NA, times=nrow(no_doc_sims))
+
+for (i in 1:nrow(no_doc_sims)) {
+      survival_both <- no_doc_sims[i, "survival_both"]
+      tol_per_sen <- no_doc_sims[i, "tol_per_sen"]
+
+      if (survival_both) {
+            if (tol_per_sen > 1) {
+                  dominant_symb[[i]] <- "Tolerant"
+            }
+
+            if (tol_per_sen < 1) {
+                  dominant_symb[[i]] <- "Sensitive"
+            }
+
+            if (tol_per_sen == 1) {
+                  dominant_symb[[i]] <- "Co-dominant"
+            }
+      } else {
+            dominant_symb[[i]] <- "No_survival"
+      }
+}
+
+no_doc_sims$dominant_symb <- as.factor(dominant_symb)
+```
+
+## DOC simulations
+
+```{r doc-sims, cache=TRUE}
+
+# run simulations for 600 days
+time<-seq(0, 600, 0.1)
+
+search_params <- data.frame("L"=runif(20000, 5, 40),       # Light, choose values between 5 and 40
+                            "N"=runif(20000, 1e-7, 6e-6),     # DIN, choose values between 0 and 6e-6
+                            "X" = runif(20000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "kCO2" = runif(20000, 10, 40))   # Host carbon-concentrating ability, choose values between 10 and 40
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+
+    # Simulations!
+    # simulate dynamics with just the sensitive symbiont
+    run_sen <- coRal::run_coral_oc(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+
+    # simulate dynamics with just the tolerant symbiont
+    run_tol <- coRal::run_coral_oc(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
+
+    # simulate dynamics with both symbionts
+    run_both <- coRal::run_coral_oc(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+
+
+    # Process simulations to get summary statistics
+
+    # 1. Convergence: have the host and symbiont growth rates stabilized? (Changed by no more than 10^-6 between the last and penultimate time steps)
+    # 1a. Simulation with sensitive symbiont alone
+    converge_sen_H <- (abs(run_sen$dH.Hdt[length(time)] - run_sen$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_sen_S <- (abs(run_sen$dS.Sdt[length(time)] - run_sen$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_sen <- converge_sen_H & converge_sen_S
+
+    # 1b. Simulation with tolerant symbiont alone
+    converge_tol_H <- (abs(run_tol$dH.Hdt[length(time)] - run_tol$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_tol_S <- (abs(run_tol$dS.Sdt[length(time)] - run_tol$dS.Sdt[length(time)-1]) <= 1e-6)
+    converge_tol <- converge_tol_H & converge_tol_S
+
+    # 1c. Simulation with both symbionts
+    converge_both_H <- (abs(run_both$dH.Hdt[length(time)] - run_both$dH.Hdt[length(time)-1]) <= 1e-6)
+    converge_both_S1 <- (abs(run_both$dS.Sdt.1[length(time)] - run_both$dS.Sdt.1[length(time)-1]) <= 1e-6)
+    converge_both_S2 <- (abs(run_both$dS.Sdt.2[length(time)] - run_both$dS.Sdt.2[length(time)-1]) <= 1e-6)
+    converge_both <- converge_both_H & (converge_both_S1 & converge_both_S2)
+
+    # 2. Survival: does the coral have positive growth at the end of the simulation?
+    survival_sen <- run_sen$dH.Hdt[length(time)] > 0
+    survival_tol <- run_tol$dH.Hdt[length(time)] > 0
+    survival_both <- run_both$dH.Hdt[length(time)] > 0
+
+    # 3. Dominance: when both symbionts are present, what is the sensitive:tolerant symbiont ratio?
+    tol_per_sen = run_both$S.2[length(time)]/run_both$S.1[length(time)]
+
+    # 4. Symbiont: host ratio
+    sh_ratio_sen = run_sen$S[length(time)]/run_sen$H[length(time)]
+    sh_ratio_tol = run_tol$S[length(time)]/run_tol$H[length(time)]
+    sh_ratio_both = (run_both$S.1[length(time)] + run_both$S.2[length(time)])/run_both$H[length(time)]
+
+    # 5. Host growth rate
+    host_growth_sen = run_sen$dH.Hdt[length(time)]
+    host_growth_tol = run_tol$dH.Hdt[length(time)]
+    host_growth_both = run_both$dH.Hdt[length(time)]
+
+    # return the parameters and summary statistics
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"], "X"=search_params[i, "X"],
+    "kCO2"=search_params[i, "kCO2"],
+    "converge_sen"=converge_sen, "converge_tol"=converge_tol, "converge_both"=converge_both,
+    "survival_sen"=survival_sen, "survival_tol"=survival_tol, "survival_both"=survival_both,
+    "tol_per_sen"=tol_per_sen,
+    "sh_ratio_sen"=sh_ratio_sen, "sh_ratio_tol"=sh_ratio_tol, "sh_ratio_both"=sh_ratio_both,
+    "host_growth_sen"=host_growth_sen, "host_growth_tol"=host_growth_tol, "host_growth_both"=host_growth_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+doc_sims <- data.frame(results, row.names=NULL)
+```
+
+```{r doc-column-types}
+# set the columns to their proper types
+doc_sims <- transform(doc_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+      converge_sen=as.logical(converge_sen), converge_tol=as.logical(converge_tol), converge_both=as.logical(converge_both),
+      survival_sen=as.logical(survival_sen), survival_tol=as.logical(survival_tol), survival_both=as.logical(survival_both),
+      tol_per_sen=as.numeric(tol_per_sen),
+      sh_ratio_sen=as.numeric(sh_ratio_sen), sh_ratio_tol=as.numeric(sh_ratio_tol), sh_ratio_both=as.numeric(sh_ratio_both),
+      host_growth_sen=as.numeric(host_growth_sen), host_growth_tol=as.numeric(host_growth_tol), host_growth_both=as.numeric(host_growth_both))
+```
+
+```{r doc-dominant-symb}
+
+dominant_symb <- rep(NA, times=nrow(doc_sims))
+
+for (i in 1:nrow(doc_sims)) {
+      survival_both <- doc_sims[i, "survival_both"]
+      tol_per_sen <- doc_sims[i, "tol_per_sen"]
+
+      if (survival_both) {
+            if (tol_per_sen > 1) {
+                  dominant_symb[[i]] <- "Tolerant"
+            }
+
+            if (tol_per_sen < 1) {
+                  dominant_symb[[i]] <- "Sensitive"
+            }
+
+            if (tol_per_sen == 1) {
+                  dominant_symb[[i]] <- "Co-dominant"
+            }
+      } else {
+            dominant_symb[[i]] <- "No_survival"
+      }
+}
+
+doc_sims$dominant_symb <- as.factor(dominant_symb)
+```
+
+
+
+# Plot outcomes (using DAPC)
+
+## No DOC
+
+```{r, cache=TRUE}
+dapc_sims <- no_doc_sims
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X", "kCO2")], grp=dapc_sims$dominant_symb, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
+scatter(mydapc, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE, col=c("#000000", "#648FFF", "#FFB000"), pch=c(0, 1, 19))
+arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
+text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
+text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
+text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[4,1], y1=mydapc$var.load[4,2])
+text(x=mydapc$var.load[4,1]/2, y=mydapc$var.load[4,2]/2, labels="KCO2", pos=4)
+summary(mydapc)
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+nrow(mydapc$tab)
+nrow(dapc_sims)
+mydapc
+```
+
+## DOC
+
+```{r, cache=TRUE}
+dapc_sims <- doc_sims
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X", "kCO2")], grp=dapc_sims$dominant_symb, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
+scatter(mydapc, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE, col=c("#000000", "#648FFF", "#FFB000"), pch=c(0, 1, 19))
+arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
+text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
+text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
+text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[4,1], y1=mydapc$var.load[4,2])
+text(x=mydapc$var.load[4,1]/2, y=mydapc$var.load[4,2]/2, labels="KCO2", pos=4)
+summary(mydapc)
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+nrow(mydapc$tab)
+nrow(dapc_sims)
+mydapc
+```
+
+
+# Starting from a bleached state
+
+## Set symbiont parameters
+
+```{r bleached-pars}
+# parameters for single-symbiont simulations
+# sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+pars_sen$initS <- 1e-4
+
+# tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+pars_tol$initS <- 1e-4
+
+# parameters for two-symbiont simulations
+# sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
+```
+
+
+## No DOC
+
+```{r no-doc-bleached-sims, cache=TRUE}
+# run simulations for 100 days to determine survival
+survival_time <-seq(0, 100, 0.1)
+
+# run simulations for 1000 days to determine equilibria (if coral survives)
+equil_time <- seq(0, 1000, 0.1)
+
+# parameters to search over
+search_params <- data.frame("L"=runif(100000, 5, 40),       # Light, choose values between 5 and 40
+                            "N"=runif(100000, 1e-7, 6e-6),     # DIN, choose values between 0 and 6e-6
+                            "X" = runif(100000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "kCO2" = runif(100000, 10, 40))   # Host carbon-concentrating ability, choose values between 10 and 40
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+      # initialize reason; will give the reason for lack of rescue if rescue does not occur
+      # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+      # reason = "T_dies" -> tolerant symbiont unable to rescue host
+      # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+      # reason = "rescue" -> rescue occurred
+      reason <- NA
+
+    # Set up the environmental conditions
+    survival_env <- coRal::init_env(time=survival_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    equil_env <- coRal::init_env(time=equil_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # Check if the sensitive symbiont can survive alone
+    run_1symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "Sensitive_alone"
+    }
+
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+        run_2symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "No_survival"
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] <= 0) {
+             reason <- "No_survival"
+        }
+
+        # further investigate the case where host growth is positive at the end of the simulation
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+             # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
+             # To figure out if this happened, we need to actually run things to equilibrium
+             run_2symb_equil <- coRal::run_coral(time=equil_time, env=equil_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+
+
+             # Check that the host and symbiont growth rates have equilibrated
+             tend <- length(equil_time)
+             dH <- abs(run_2symb_equil[tend - 1, "dH.Hdt"] -  run_2symb_equil[tend, "dH.Hdt"])
+             dS1 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.1"] -  run_2symb_equil[tend, "dS.Sdt.1"])
+             dS2 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.2"] -  run_2symb_equil[tend, "dS.Sdt.2"])
+             equilibrated <- ((dH <= 1e-5) & (dS1 <= 1e-5) & (dS2 <= 1e-5))
+
+             # if things have not equilibrated, we can't know the outcome; set reason to not_equil
+             if (equilibrated == FALSE) {
+                   reason <- "Not_equil"
+             }
+
+             # if things have equilibrated and there is more tolerant that sensitive symbiont, set reason to "T_dominates"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] < run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "Tolerant_dominates"
+             }
+
+             # if things have equilibrated and there is more sensitive that tolerant symbiont, set reason to "rescue"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] > run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "Rescue"
+             }
+
+             # if things have equilibrated to equal amounts of sensitive and tolerant symbiont (a) this is really weird and
+             # (b) set reason to "possible_coexist"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] == run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "Possible_coexist"
+             }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"], "reason"=reason)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+no_doc_bleached_sims <- data.frame(results, row.names=NULL)
+
+```
+
+```{r no-doc-bleached-column-types}
+# set the columns to their proper types
+no_doc_bleached_sims <- transform(no_doc_bleached_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+      reason=as.character(reason))
+
+no_doc_bleached_sims$reason <- factor(no_doc_bleached_sims$reason, levels=c("Sensitive_alone", "No_survival", "Tolerant_dominates", "Rescue"))
+```
+
+
+## DOC
+
+```{r doc-bleached-sims, cache=TRUE}
+# run simulations for 100 days to determine survival
+survival_time <-seq(0, 100, 0.1)
+
+# run simulations for 1000 days to determine equilibria (if coral survives)
+equil_time <- seq(0, 1000, 0.1)
+
+# parameters to search over
+search_params <- data.frame("L"=runif(100000, 5, 40),       # Light, choose values between 5 and 40
+                            "N"=runif(100000, 1e-7, 6e-6),     # DIN, choose values between 0 and 6e-6
+                            "X" = runif(100000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "kCO2" = runif(100000, 10, 40))   # Host carbon-concentrating ability, choose values between 10 and 40
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# start the timer
+start <- proc.time()
+
+
+# results will hold the parameter values tested as well as whether the tolerant symbiont "rescued"
+# the sensitive symbiont at each parameter value
+
+results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+      # initialize reason; will give the reason for lack of rescue if rescue does not occur
+      # reason = "S_lives" -> host recovers with sensitive symbiont alone; does not need to be rescued by tolerant
+      # reason = "T_dies" -> tolerant symbiont unable to rescue host
+      # reason = "T_dominates" -> tolerant symbiont permits host recovery while sensitive does not, but tolerant dominates post-recovery
+      # reason = "rescue" -> rescue occurred
+      reason <- NA
+
+    # Set up the environmental conditions
+    survival_env <- coRal::init_env(time=survival_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    equil_env <- coRal::init_env(time=equil_time, L=c(search_params[i, "L"], search_params[i, "L"], 0),
+                           N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
+
+    # Check if the sensitive symbiont can survive alone
+    run_1symb <- coRal::run_coral_oc(time=survival_time, env=survival_env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+
+    # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
+          reason <- "Sensitive_alone"
+    }
+
+    # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
+    if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
+
+        run_2symb <- coRal::run_coral_oc(time=survival_time, env=survival_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+
+        # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
+        # set reason to "No_survival"
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] <= 0) {
+             reason <- "No_survival"
+        }
+
+        # further investigate the case where host growth is positive at the end of the simulation
+        if (run_2symb$dH.Hdt[length(run_2symb$dH.Hdt)] > 0) {
+
+             # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
+             # To figure out if this happened, we need to actually run things to equilibrium
+             run_2symb_equil <- coRal::run_coral_oc(time=equil_time, env=equil_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+
+             # Check that the host and symbiont growth rates have equilibrated
+             tend <- length(equil_time)
+             dH <- abs(run_2symb_equil[tend - 1, "dH.Hdt"] -  run_2symb_equil[tend, "dH.Hdt"])
+             dS1 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.1"] -  run_2symb_equil[tend, "dS.Sdt.1"])
+             dS2 <- abs(run_2symb_equil[tend - 1, "dS.Sdt.2"] -  run_2symb_equil[tend, "dS.Sdt.2"])
+             equilibrated <- ((dH <= 1e-5) & (dS1 <= 1e-5) & (dS2 <= 1e-5))
+
+             # if things have not equilibrated, we can't know the outcome; set reason to not_equil
+             if (equilibrated == FALSE) {
+                   reason <- "Not_equil"
+             }
+
+             # if things have equilibrated and there is more tolerant that sensitive symbiont, set reason to "T_dominates"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] < run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "Tolerant_dominates"
+             }
+
+             # if things have equilibrated and there is more sensitive that tolerant symbiont, set reason to "rescue"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] > run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "Rescue"
+             }
+
+             # if things have equilibrated to equal amounts of sensitive and tolerant symbiont (a) this is really weird and
+             # (b) set reason to "possible_coexist"
+             if (equilibrated & (run_2symb_equil$S.1[length(run_2symb_equil$S.1)] == run_2symb_equil$S.2[length(run_2symb_equil$S.2)])) {
+                   reason <- "Possible_coexist"
+             }
+        }
+    }
+
+    # return the parameters and whether rescue was successful or not
+    list("L"=search_params[i, "L"], "N"=search_params[i, "N"],
+    "X"=search_params[i, "X"], "kCO2"=search_params[i, "kCO2"], "reason"=reason)
+}
+
+stopCluster(cl) # stop the cluster
+
+# store results in dataframe
+doc_bleached_sims <- data.frame(results, row.names=NULL)
+
+```
+
+```{r doc-bleached-column-types}
+# set the columns to their proper types
+doc_bleached_sims <- transform(doc_bleached_sims,
+      L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
+      reason=as.character(reason))
+
+doc_bleached_sims$reason <- factor(doc_bleached_sims$reason, levels=c("Sensitive_alone", "No_survival", "Tolerant_dominates", "Rescue"))
+```
+
+# DAPC plots
+
+## No DOC
+
+```{r, cache=TRUE}
+dapc_sims <- no_doc_bleached_sims[!is.na(no_doc_bleached_sims$reason),]
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X", "kCO2")], grp=dapc_sims$reason, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
+scatter(mydapc, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE,
+  col=c("#648FFF20", rgb(0, 0, 0, alpha=0.1), "#FFB000", "#DC267F"), pch=c(1, 0, 19, 15))
+arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
+text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
+text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
+text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[4,1], y1=mydapc$var.load[4,2])
+text(x=mydapc$var.load[4,1]/2, y=mydapc$var.load[4,2]/2, labels="KCO2", pos=4)
+summary(mydapc)
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+nrow(mydapc$tab)
+nrow(dapc_sims)
+mydapc
+```
+
+
+## DOC
+
+```{r, cache=TRUE}
+dapc_sims <- doc_bleached_sims[!is.na(doc_bleached_sims$reason),]
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X", "kCO2")], grp=dapc_sims$reason, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
+scatter(mydapc, cell = 0, cstar = 0, mstree = FALSE, lwd = 2, lty = 2, axesell=TRUE, scree.da=FALSE, inset.pca=TRUE,
+  col=c("#648FFF20", rgb(0, 0, 0, alpha=0.1), "#FFB000", "#DC267F"), pch=c(1, 0, 19, 15))
+arrows(x0=0, y0=0, x1=mydapc$var.load[1,1], y1=mydapc$var.load[1,2])
+text(x=mydapc$var.load[1,1]/2, y=mydapc$var.load[1,2]/2, labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=mydapc$var.load[2,1], y1=mydapc$var.load[2,2])
+text(x=mydapc$var.load[2,1]/1, y=mydapc$var.load[2,2]/2, labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[3,1], y1=mydapc$var.load[3,2])
+text(x=mydapc$var.load[3,1]/2, y=mydapc$var.load[3,2]/2, labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=mydapc$var.load[4,1], y1=mydapc$var.load[4,2])
+text(x=mydapc$var.load[4,1]/2, y=mydapc$var.load[4,2]/2, labels="KCO2", pos=4)
+summary(mydapc)
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+nrow(mydapc$tab)
+nrow(dapc_sims)
+mydapc
+```
