@@ -789,7 +789,132 @@ col=c("#648FFF", "#FFB000", "#DC267F", rgb(0, 0, 0)), pch=c(1, 19, 15, 0),
 bg="white")
 ```
 
+# C and N limitation during rescue
+
 ```{r}
+# Let's make a sweet function that returns limitation for hosts and symbionts!
+# Input:
+#   - run, a coRal:run_coral or coRal::run_coral_oc simulation
+#   - pars, the host and symbiont parameters used for run (coRal::def_pars format)
+cn_limitation <- function(run, pars) {
+  # Initialize the list of limitation values to be returned
+  limList <- list()
+
+  # Get the number of symbionts
+  nsym <- length(pars$initS)
+
+  ### If there is only one symbiont
+  if(nsym == 1) {
+
+    ## Symbiont
+    # inputs to symbiont growth SU
+    symbC <- pars$yC * run$jCP # carbon input
+    symbN <- (run$rhoN * run$H/run$S + run$rNS)/pars$nNS # nitrogen input
+
+    # Symbiont C/N limitation (positive = n-limited, negative = c-limited)
+    symbLim <- log(pmin(symbC, pars$jSGm) / pmin(symbN, pars$jSGm))
+    limList$S <- symbLim # add symbiont C/N limitation to the output
+
+
+    ## Host
+    # inputs to the host growth SU
+    hostC <- pars$yC * run$rhoC * run$S / run$H + run$jX # carbon input
+    hostN <- (run$jN + pars$nNX * run$jX + run$rNH) / pars$nNH # nitrogen input
+
+    # Host C/N limitation
+    hostLim <- log(pmin(hostC, pars$jHGm) / pmin(hostN, pars$jHGm))
+    limList$H <- hostLim # add host C/N limitation to the output
+  }
+
+  ### If there are multiple symbionts
+  if(nsym > 1) {
+
+    ## Symbiont
+    for(i in 1:nsym) {
+      # Inputs symbiont i's growth SU
+      symbC <- pars$yC * run[[paste0("jCP.", i)]] # carbon input
+      symbN <- (run$rhoN * run$H/run[[paste0("S.", i)]] + run[[paste0("rNS.", i)]])/pars$nNS[i] # nitrogen input
+
+      # Symbiont i's C/N limitation
+      symbLim <- log(pmin(symbC, pars$jSGm[i]) / pmin(symbN, pars$jSGm[i]))
+      limList[[paste0("S.", i)]] <- symbLim # add symb. i's C/N limitation to the output
+    }
+
+    ## Host
+    # carbon from symbiont i to host
+    csymbi <- sapply(1:nsym, function(i) {
+        run[[paste0("rhoC.", i)]] * run[[paste0("S.", i)]]
+      })
+
+    # total carbon from symbionts to host
+    csymbtot <- apply(csymbi, 1, sum)
+
+    # carbon input to host growth SU
+    hostC <- pars$yC * csymbtot / run$H + run$jX
+
+    # nitrogen input to host grwoth SU
+    hostN <- (run$jN + pars$nNX * run$jX + run$rNH) / pars$nNH
+
+    # Host C/N limitation
+    hostLim <- log(pmin(hostC, pars$jHGm) / pmin(hostN, pars$jHGm))
+    limList$H <- hostLim # add host C/N limitation to the output
+  }
+
+  return(limList)
+}
+```
+
+Positive C/N-limitation means N-limited (like Figure 9))
+Why doesn't this become positive when host growth becomes positive?
+
+```{r}
+rescue_sims <- no_doc_bleached_sims[no_doc_bleached_sims$reason=="Rescue",]
+
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+time <- seq(0, 150, 0.1)
+
+par(mfcol=c(3, 3))
+for (i in 1:9) {
+  Li <- rescue_sims[i, "L"]
+  Ni <- rescue_sims[i, "N"]
+  Xi <- rescue_sims[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  cnlim <- cn_limitation(run, pars_both)
+
+  minlim <- min(cnlim$S.1, cnlim$S.2, cnlim$H)
+  maxlim <- max(cnlim$S.1, cnlim$S.2, cnlim$H)
+
+  plot(time, cnlim$S.1, type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
+      main=paste("Sim", i), ylim=c(minlim, maxlim))
+  lines(time, cnlim$S.2, col="#FFB000")
+  lines(time, cnlim$H, col="black")
+
+  if (i == 1) {
+    legend("left", c("S. symb", "T. symb", "host"), col=c("#648FFF", "#FFB000", "black"),
+      lty=1)
+  }
+
+  minSH <- min(run$S.1/run$H, run$S.2/run$H)
+  maxSH <- max(run$S.1/run$H, run$S.2/run$H)
+
+  plot(time, run$S.1/run$H, type="l", col="#648FFF", xlab="time (days)", ylab="S/H ratio",
+    main=paste("Sim", i), ylim=c(minSH, maxSH))
+  lines(time, run$S.2/run$H, col="#FFB000")
+
+  plot(time, run$dH.Hdt, type="l", col="black", xlab="time (days)", ylab="dH/Hdt",
+    main=paste("Sim", i), ylim=c(-0.02, 0.02))
+  lines(time, rep(0, length(time)))
+}
+
 # myL <- no_doc_bleached_sims[no_doc_bleached_sims$reason=="Rescue",][1,"L"]
 # myN <- no_doc_bleached_sims[no_doc_bleached_sims$reason=="Rescue",][1,"N"]
 # myX <- no_doc_bleached_sims[no_doc_bleached_sims$reason=="Rescue",][1,"X"]
