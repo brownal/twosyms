@@ -190,6 +190,31 @@ for (i in 1:nrow(no_doc_sims)) {
 no_doc_sims$dominant_symb <- factor(dominant_symb, levels=c("Sensitive", "No_survival", "Tolerant", "Co-dominant"))
 ```
 
+
+```{r no-doc-1-symb-survival}
+
+survival_1symb <- rep(NA, times=nrow(no_doc_sims))
+
+for (i in 1:nrow(no_doc_sims)) {
+  survival_sen <- no_doc_sims[i, "survival_sen"]
+  survival_tol <- no_doc_sims[i, "survival_tol"]
+
+  if (survival_sen && survival_tol) {
+    survival_1symb[[i]] <- "Both"
+  } else {
+    if (survival_sen) {
+      survival_1symb[[i]] <- "Sensitive"
+    } else if (survival_tol) {
+      survival_1symb[[i]] <- "Tolerant"
+    } else {
+      survival_1symb[[i]] <- "No_survival"
+    }
+  }
+}
+
+no_doc_sims$survival_1symb <- factor(survival_1symb, levels=c("Sensitive", "No_survival", "Tolerant", "Both"))
+```
+
 ## DOC simulations
 
 ```{r doc-sims, cache=TRUE}
@@ -321,6 +346,29 @@ doc_sims$dominant_symb <- factor(dominant_symb, levels=c("Sensitive", "No_surviv
 ```
 
 
+```{r doc-1-symb-survival}
+
+survival_1symb <- rep(NA, times=nrow(doc_sims))
+
+for (i in 1:nrow(no_doc_sims)) {
+  survival_sen <- doc_sims[i, "survival_sen"]
+  survival_tol <- doc_sims[i, "survival_tol"]
+
+  if (survival_sen && survival_tol) {
+    survival_1symb[[i]] <- "Both"
+  } else {
+    if (survival_sen) {
+      survival_1symb[[i]] <- "Sensitive"
+    } else if (survival_tol) {
+      survival_1symb[[i]] <- "Tolerant"
+    } else {
+      survival_1symb[[i]] <- "No_survival"
+    }
+  }
+}
+
+doc_sims$survival_1symb <- factor(survival_1symb, levels=c("Sensitive", "No_survival", "Tolerant", "Both"))
+```
 
 # Plot outcomes (using DAPC)
 
@@ -373,6 +421,38 @@ col=c("#648FFF", "#FFB000", rgb(0, 0, 0)), pch=c(1, 19, 0),
 bg="white")
 #dev.off()
 ```
+
+### Survival with each symbiont alone
+
+```{r}
+dapc_sims <- no_doc_sims
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X", "kCO2")], grp=dapc_sims$survival_1symb, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 4, n.da = 3)
+
+mydapc
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+summary(mydapc)
+
+plot(mydapc$ind.coord[,"LD1"], mydapc$ind.coord[,"LD2"], col=c("#648FFF", rgb(0, 0, 0), "#FFB000", "#00FABE")[mydapc$grp], pch=c(1, 0, 19, 3)[mydapc$grp],
+  xlab="DAPC axis 1", ylab="DAPC axis 2")
+
+
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[1,1], y1=1.5*mydapc$var.load[1,2], length=0.1)
+text(x=1.5*mydapc$var.load[1,1], y=1.5*mydapc$var.load[1,2], labels="Light", pos=3)
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[2,1], y1=1.5*mydapc$var.load[2,2], length=0.1)
+text(x=1.5*mydapc$var.load[2,1], y=1.5*mydapc$var.load[2,2], labels="Nitrogen", pos=4)
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[3,1], y1=1.5*mydapc$var.load[3,2], length=0.1)
+text(x=1.5*mydapc$var.load[3,1], y=1.5*mydapc$var.load[3,2], labels="Food", pos=4)
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[4,1], y1=1.5*mydapc$var.load[4,2], length=0.1)
+text(x=1.5*mydapc$var.load[4,1], y=1.5*mydapc$var.load[4,2], labels="Host CCM", pos=4)
+
+legend("topright", c("Sensitive", "Tolerant", "Both", "No survival"),
+col=c("#648FFF", "#FFB000", "#00FABE", rgb(0, 0, 0)), pch=c(1, 19, 3, 0),
+bg="white")
+```
+
 
 ## DOC
 
