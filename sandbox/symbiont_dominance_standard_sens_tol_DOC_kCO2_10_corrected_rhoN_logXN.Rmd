@@ -73,8 +73,8 @@ pars_both$initS[1:2] <- c(0.5, 0.5)
 time<-seq(0, 600, 0.1)
 
 search_params <- data.frame("L"=runif(30000, 5, 60),       # Light, choose values between 5 and 40
-                            "N"=runif(30000, 1e-8, 1e-5),     # DIN, choose values between 0 and 6e-6
-                            "X" = runif(30000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "N"=10^runif(30000, -8, -5),     # DIN, choose values between 0 and 6e-6
+                            "X" = 10^runif(30000, -8, -6.4),     # Food, choose values between 0 and 4e07
                             "kCO2" = rep(10, 30000))   # Host carbon-concentrating ability, choose value of 10
 
 # set up for parallel run
@@ -235,7 +235,7 @@ no_doc_sims$survival_1symb <- factor(survival_1symb, levels=c("Sensitive", "No_s
 time<-seq(0, 600, 0.1)
 
 search_params <- expand.grid("L"=seq(5, 60, 0.5),       # Light, choose values between 5 and 40
-                            "N"=seq(1e-8, 1e-5, 1e-7),     # DIN, choose values between 0 and 6e-6
+                            "N"=10^seq(-8, -5, 0.05),     # DIN, choose values between 0 and 6e-6
                             "X" = 0,     # Food, choose values between 0 and 4e07
                             "kCO2" = 10)   # Host carbon-concentrating ability, choose value of 10
 
@@ -371,8 +371,8 @@ no_doc_no_food_sims$survival_1symb <- factor(survival_1symb, levels=c("Sensitive
 time<-seq(0, 600, 0.1)
 
 search_params <- data.frame("L"=runif(30000, 5, 60),       # Light, choose values between 5 and 40
-                            "N"=runif(30000, 1e-8, 1e-5),     # DIN, choose values between 0 and 6e-6
-                            "X" = runif(30000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "N"=10^runif(30000, -8, -5),     # DIN, choose values between 0 and 6e-6
+                            "X" = 10^runif(30000, -8, -6.4),     # Food, choose values between 0 and 4e07
                             "kCO2" = rep(10, 30000))   # Host carbon-concentrating ability, choose value of 10
 
 # set up for parallel run
@@ -915,8 +915,8 @@ equil_time <- seq(0, 1000, 0.1)
 
 # parameters to search over
 search_params <- data.frame("L"=runif(150000, 5, 60),       # Light, choose values between 5 and 40
-                            "N"=runif(150000, 1e-8, 1e-5),     # DIN, choose values between 0 and 6e-6
-                            "X" = runif(150000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "N"=10^runif(150000, -8, -5),     # DIN, choose values between 0 and 6e-6
+                            "X" = 10^runif(150000, -8, -6.4),     # Food, choose values between 0 and 4e07
                             "kCO2" = rep(10, 150000))   # Host carbon-concentrating ability, choose value of 10
 
 # set up for parallel run
@@ -1036,8 +1036,8 @@ equil_time <- seq(0, 1000, 0.1)
 
 # parameters to search over
 search_params <- data.frame("L"=runif(150000, 5, 60),       # Light, choose values between 5 and 40
-                            "N"=runif(150000, 1e-8, 1e-5),     # DIN, choose values between 0 and 6e-6
-                            "X" = runif(150000, 0, 4e-7),     # Food, choose values between 0 and 4e07
+                            "N"=10^runif(150000, -8, -5),     # DIN, choose values between 0 and 6e-6
+                            "X" = 10^runif(150000, -8, -6.4),     # Food, choose values between 0 and 4e07
                             "kCO2" = rep(10, 150000))   # Host carbon-concentrating ability, choose value of 10
 
 # set up for parallel run
