@@ -7,7 +7,7 @@ pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
 pars_none <- def_pars(nsym=1)
 pars_none$initS <- 0
 
-time <- seq(0, 600, 0.1)
+time <- seq(0, 365, 0.1)
 
 grH <- rep(NA, nrow(rescue_sims))
 grHnoST <- rep(NA, nrow(rescue_sims))
@@ -26,7 +26,7 @@ for(i in 1:nrow(rescue_sims)) {
   env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
 
   run <- run_coral_oc(time=time, env=env, pars=pars_both)
-  run0 <- run_coral_oc(time=time, env=env, pars=pars_none)
+  #run0 <- run_coral_oc(time=time, env=env, pars=pars_none)
   
   grH[[i]] <- run$dH.Hdt[length(time)]
   grHnoST[[i]] <- run0$dH.Hdt[length(time)]
@@ -57,7 +57,25 @@ summary(shratio)
 
 plot(cnlimS, cnlimT)
 
-plot(cnlimS, shratio)
+plot(cnlimS, shratio, xlab="C-N limitation of symbiont (positive = N-lim)",
+	ylab="Total symbiont:host ratio", col="#648FFF80", pch=16)
+
+points(cnlimT, shratio, col="#FFB00080", pch=15)
+legend("topright", legend=c("Sensitive", "Tolerant"), pch=c(16, 15),
+   col=c("#648FFF", "#FFB000"))
+
+grHist <- hist(grHnoST, plot=FALSE, breaks=seq(-0.015, 0.005, 0.0025),
+	right=FALSE)
+grHist$density <- grHist$counts/sum(grHist$counts)
+
+
+plot(grHist, freq=FALSE, ylab="Fraction of simulations",
+  main="Aposymbiotic host growth rate after 365 days", col="gray", 
+  xlab="Bars include only values < rightmost value")
+
+
+sum(cnlimS >= 0)/140
+
 
 plot(cnlimS[shratio < 0.2], shratio[shratio < 0.2])
 
@@ -74,3 +92,32 @@ plot(cnlimS[shratio < 0.2], shratio[shratio < 0.2])
 
 
 # Also check recovery with just S
+
+
+
+
+## What's the N-limitation when S:H becomes 0.2?
+time <- seq(0, 365*2, 0.1)
+
+for(i in 1:nrow(rescue_sims)) {
+
+  Li <- 4 #rescue_sims[i, "L"]
+  Ni <- rescue_sims[i, "N"]
+  Xi <- rescue_sims[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+
+  run <- run_coral_oc(time=time, env=env, pars=pars_both)
+
+  cnlim <- cn_limitation(run, pars_both)
+
+  sh <- ((run$S.1 + run$S.2)/run$H)
+
+
+  cnlimH[[i]] <- cnlim$H[length(time)]
+  cnlimS[[i]] <- cnlim$S.1[length(time)]
+  cnlimT[[i]] <- cnlim$S.2[length(time)]
+
+  stratio[[i]] <- (run$S.1/run$S.2)[length(time)]
+  shratio[[i]] <- ((run$S.1 + run$S.2)/run$H)[length(time)]
+}
