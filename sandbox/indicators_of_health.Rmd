@@ -1,0 +1,286 @@
+---
+title: "Investigating possible indicators of coral recovery from bleaching"
+author: "Ross Cunning and Alexandra Brown"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r set-options}
+# Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+# Load packages
+library("coRal")
+library("foreach")
+library("parallel")
+library("doParallel")
+library("MASS")
+library("adegenet")
+library("knitr")
+
+# Plot size for running this in-line
+options(repr.plot.res=240)
+
+# Load functions
+source("cn_limitation.R") # calculates carbon/nitrogen of biomass SU
+source("light_limitation.R")
+```
+
+# Simulate bleached hosts
+
+## Set symbiont parameters
+
+```{r set-bleached-pars}
+## Parameters for single-symbiont simulations ##
+# Sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+pars_sen$initS <- 1e-4
+
+# Tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+pars_tol$initS <- 1e-4
+
+## Parameters for two-symbiont simulations ##
+# Sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
+```
+
+
+## Run the simulations
+Record various possible indicators of a healthy host
+
+```{r run-sims, cache=TRUE}
+# run simulations for 100 days to determine survival
+time <-seq(0, 100, 0.1)
+
+
+# randomly draw environments to simulate corals in
+env_params <- data.frame("L"=runif(150000, 5, 60),       # Light, draw values between 5 and 60 mol photons/m^2/day
+                            "N"=10^runif(150000, -8, -5),     # Dissolved inorganic nitrogen, draw values between 10^-8 and 10^-5 mol/L
+                            "X" = 10^runif(150000, -8, -6.4))     # Food, draw values between 10^-8 and 10^-6.4 (about 4*10^-7) mol/L
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  # Run the simulation
+  run <- coRal::run_coral(time=time, env=env, pars=pars_both)
+
+  # Calculate C-N limitation
+  cnlim <- cn_limitation(run, pars_both)
+
+  # Calculate CO2-light limitation
+  cllim <- light_limitation(run, pars_both)
+
+  # Possible measures of recovery from bleaching: host growth, host nitrogen limitation,
+  # and lack of symbiont carbon limitation
+  posGrH <- any(run$dH.Hdt > 0) # is host growth positive?
+  NlimH <- any(cnlim$H > 0) # is host nitrogen-limited?
+  noClimS.1 <- any(cnlim$S.1 >= 0) # is the sensitive symb. NOT carbon-limited?
+  noClimS.2 <- any(cnlim$S.2 >= 0) # is the tolerant symb. NOT carbon-limited?
+  noClimS <- any((cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # are both symbionts NOT carbon-limited at the same time?
+  posGrH_NlimH <- any((run$dH.Hdt > 0) & (cnlim$H > 0)) # is the host both growing and nitrogen-limited at the same time?
+  posGrH_noClimS <- any((run$dH.Hdt > 0) & (cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # is the host growing at the same time both symbionts are NOT carbon-limited?
+  NlimH_noClimS <- any((cnlim$H > 0) & (cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # is the host nitrogen-limited at the same time both symbionts are NOT carbon-limited?
+  posGrH_NlimH_noClimS <- any((run$dH.Hdt > 0 ) & (cnlim$H > 0) & (cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # is the host growing and nitrogen-limited at the same time both symbionts are NOT carbon-limited?
+
+
+  # Possible measures of recovery from bleaching: host growth and light-limited photosynthesis
+  lightLim.1 <- any(cllim$S.1 > 0)
+  lightLim.2 <- any(cllim$S.2 > 0)
+  lightLim <- any((cllim$S.1 > 0) & (cllim$S.2 > 0))
+  posGrH_lightLim <- any((run$dH.Hdt > 0) & (cllim$S.1 > 0) & (cllim$S.2 > 0))
+
+  # Return the environmental parameters & possible measures of recovery from bleaching
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH"=posGrH, "NlimH"=NlimH, "noClimS.1"=noClimS.1, "noClimS.2"=noClimS.2,
+    "noClimS"=noClimS, "posGrH_NlimH"=posGrH_NlimH, "posGrH_noClimS"=posGrH_noClimS,
+    "NlimH_noClimS"=NlimH_noClimS, "posGrH_NlimH_noClimS"=posGrH_NlimH_noClimS,
+    "lightLim.1"=lightLim.1, "lightLim.2"=lightLim.2, "lightLim"=lightLim,
+    "posGrH_lightLim"=posGrH_lightLim)
+}
+
+stopCluster(cl) # stop the cluster
+
+# Store results in dataframe, as type numeric
+sim_bleached <- data.frame(results, row.names=NULL)
+sim_bleached <- lapply(sim_bleached, as.numeric)
+```
+
+
+# How often did each indicator suggest positive growth?
+Note: positive growth here is just showing positive growth once. For previous simulations,
+I looked for positive growth at 100 days, which avoids the problem of everything being
+initialized with positive growth.
+
+```{r summarize-indicators}
+sim_bleached <- as.data.frame(sim_bleached)
+indicators <- sim_bleached[, !(names(sim_bleached) %in% c("L", "X", "N"))]
+indicators <- lapply(indicators, mean)
+print(indicators)
+
+```
+
+
+# Selected simulations for various indicators
+
+## Positive host growth
+
+```{r def-plotting-function, cache=TRUE}
+# A function make some pretty plots
+# Input:
+#  - run: a run_coral simulation
+#  - pars: parameters used to run the simulation (coRal::def_pars format)
+#  - i: a number/string to label the plots with
+#
+# Output:
+#  - Plot of host growth rate (dH/Hdt)
+#  - Plot of symbiont/host ratio
+#  - Plot of C/N limitation
+#  - Plot of CO2/light limitation
+
+niceplots <- function(run, pars, i) {
+
+  # Calculate C/N and CO2/light limitation
+  cnlim <- cn_limitation(run, pars_both)
+  cllim <- light_limitation(run, pars_both)
+
+  # Find the min and max values of the things we'll plot
+  mincnlim <- min(unlist(lapply(cnlim, min)), 0)
+  maxcnlim <- min(unlist(lapply(cnlim, max)), 0)
+
+  mincllim <- min(unlist(lapply(cllim, min)), 0)
+  maxcllim <- min(unlist(lapply(cllim, max)), 0)
+
+  minSH <- min(run$S.1/run$H, run$S.2/run$H)
+  maxSH <- max(run$S.1/run$H, run$S.2/run$H)
+
+  minGr <- min(run$dH.Hdt, 0)
+  maxGr <- max(run$dH.Hdt, 0)
+
+  # Plot host growth rate
+  plot(run$time, rep(0, length(run$time)), type="l", col="gray", ylim=c(minGr, maxGr),
+    main=paste0("Sim ", i, ": dH/Hdt"), xlab="time (days)", ylab="dH/Hdt") # Put a line at gr = 0
+  lines(run$time, run$dH.Hdt)
+
+  # Plot symbiont/host ratio
+  plot(time, run$S.1/run$H, type="l", col="#648FFF", xlab="time (days)", ylab="S/H ratio",
+    main=paste0("Sim ", i, ": S/H"), ylim=c(minSH, maxSH), log="y")
+  lines(time, run$S.2/run$H, col="#FFB000")
+
+  # Plot C/N limitation
+  plot(run$time, cnlim$S.1, type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
+      main=paste0("Sim ", i, ": C/N lim"), ylim=c(mincnlim, maxcnlim))
+  lines(time, cnlim$S.2, col="#FFB000")
+  lines(time, cnlim$H, col="black")
+
+  # Plot CO2/light limitation
+  plot(run$time, cllim$S.1, type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
+      main=paste0("Sim ", i, ": Light lim"), ylim=c(mincllim, maxcllim))
+  lines(time, cllim$S.2, col="#FFB000")
+}
+```
+
+
+## Host N-limitation
+
+```{r}
+par(mfrow=c(4, 4))
+sims <- seq(1:nrow(sim_bleached))[sim_bleached$NlimH == 1]
+sims <- sample(sims, min(8, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+
+  if (i == min(sims)) {
+    legend("left", c("S. symb", "T. symb", "host"), col=c("#648FFF", "#FFB000", "black"),
+      lty=1)
+  }
+}
+```
+
+
+## Host N-limitation & symbiont C-limitation
+
+```{r}
+par(mfrow=c(4, 4))
+sims <- seq(1:nrow(sim_bleached))[sim_bleached$NlimH_noClimS == 1]
+sims <- sample(sims, min(8, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+}
+```
+
+## Host N-limitation & symbiont C-limitation & positive host growth
+
+```{r}
+par(mfrow=c(4, 4))
+sims <- seq(1:nrow(sim_bleached))[sim_bleached$posGrH_NlimH_noClimS == 1]
+sims <- sample(sims, min(8, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+}
+```
+
+## Light limitation & positive host growth
+
+```{r}
+par(mfrow=c(4, 4))
+sims <- seq(1:nrow(sim_bleached))[sim_bleached$posGrH_lightLim == 1]
+sims <- sample(sims, min(8, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+}
+```
