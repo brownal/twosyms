@@ -1531,7 +1531,7 @@ for (i in 1:min(30, nrow(rescue_sims))) {
   maxSH <- max(run$S.1/run$H, run$S.2/run$H)
 
   plot(time, run$S.1/run$H, type="l", col="#648FFF", xlab="time (days)", ylab="S/H ratio",
-    main=paste("Sim", i), ylim=c(minSH, maxSH))
+    main=paste("Sim", i), ylim=c(minSH, maxSH), log="y")
   lines(time, run$S.2/run$H, col="#FFB000")
 
   plot(time, run$dH.Hdt, type="l", col="black", xlab="time (days)", ylab="dH/Hdt",
@@ -1658,7 +1658,7 @@ for (i in 1:nrow(cnlim_sims)) {
   maxSH <- max(run$S.1/run$H, run$S.2/run$H)
 
   plot(time, run$S.1/run$H, type="l", col="#648FFF", xlab="time (days)", ylab="S/H ratio",
-    main=paste("Sim", i), ylim=c(minSH, maxSH))
+    main=paste("Sim", i), ylim=c(minSH, maxSH), log="y")
   lines(time, run$S.2/run$H, col="#FFB000")
 
   plot(time, run$dH.Hdt, type="l", col="black", xlab="time (days)", ylab="dH/Hdt",
