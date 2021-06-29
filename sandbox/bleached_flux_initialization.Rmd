@@ -1,0 +1,196 @@
+---
+title: "Simulate bleached corals with 'bleached' initial fluxes"
+author: "Alexandra Brown and Ross Cunning"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r set-options}
+# Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+# Load packages
+library("coRal")
+library("foreach")
+library("parallel")
+library("doParallel")
+library("MASS")
+library("adegenet")
+library("knitr")
+
+# Plot size for running this in-line
+options(repr.plot.res=240)
+
+# Load functions
+source("cn_limitation.R") # calculates carbon/nitrogen of biomass SU
+source("light_limitation.R")
+source("synth.R")
+source("run_coral_initFluxes.R")
+```
+
+# Simulate bleached hosts
+
+```{r set-bleached-pars, cache=TRUE}
+## Parameters for single-symbiont simulations ##
+
+# Sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+pars_sen$initS <- 1e-4
+
+# Tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+pars_tol$initS <- 1e-4
+
+## Parameters for two-symbiont simulations ##
+# Sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+# initial fluxes
+initjHG <- 0
+initjCP_single <- 0
+initjCP_both <- c(0, 0)
+```
+
+```{r run-sims, cache=TRUE, dependson=c("set-bleached-pars")}
+## Run the simulations and record various possible indicators of a healthy host ##
+
+# run simulations for 100 days to determine survival
+time <-seq(0, 100, 0.1)
+
+
+# randomly draw environments to simulate corals in
+env_params <- data.frame("L"=runif(150000, 5, 60),       # Light, draw values between 5 and 60 mol photons/m^2/day
+                            "N"=10^runif(150000, -8, -5),     # Dissolved inorganic nitrogen, draw values between 10^-8 and 10^-5 mol/L
+                            "X" = 10^runif(150000, -8, -6.4))     # Food, draw values between 10^-8 and 10^-6.4 (about 4*10^-7) mol/L
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  # Simulate bleached hosts with sensitive, tolerant, or both symbionts
+  run_sen <- run_coral_initFluxes(time=time, env=env, pars=pars_sen, initjHG=initjHG, initjCP=initjCP_single)
+  run_tol <- run_coral_initFluxes(time=time, env=env, pars=pars_tol, initjHG=initjHG, initjCP=initjCP_single)
+  run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=initjHG, initjCP=initjCP_both)
+
+  # Calculate C-N limitation
+  cnlim_sen <- cn_limitation(run_sen, pars_sen)
+  cnlim_tol <- cn_limitation(run_tol, pars_tol)
+  cnlim_both <- cn_limitation(run_both, pars_both)
+
+  # Possible measures of recovery from bleaching:
+  # Host growth
+  posGrH_sen <- (run_sen$dH.Hdt[length(time)] > 0)
+  posGrH_tol <- (run_tol$dH.Hdt[length(time)] > 0)
+  posGrH_both <- (run_both$dH.Hdt[length(time)] > 0)
+
+  # Host not carbon-limited
+  noClimH_sen <- (cnlim_sen$H[length(time)] >= 0)
+  noClimH_tol <- (cnlim_tol$H[length(time)] >= 0)
+  noClimH_both <- (cnlim_both$H[length(time)] >= 0)
+
+  # Symbiont(s) not carbon-limited
+  noClimS_sen <- (cnlim_sen$S[length(time)] >= 0)
+  noClimS_tol <- (cnlim_tol$S[length(time)] >= 0)
+  noClimS_both <- ((cnlim_both$S.1[length(time)] >= 0) & (cnlim_both$S.2[length(time)] >= 0))
+
+  # Also record the maximum symbiont:host ratio (possible overshoot)
+  shMax_sen <- max(run_sen$S / run_sen$H)
+  shMax_tol <- max(run_tol$S / run_tol$H)
+  shMax_both <- max((run_both$S.1 + run_both$S.2) / run_both$H)
+
+
+  # Return the environmental parameters & possible measures of recovery from bleaching
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH.sen"=posGrH_sen, "noClimH.sen"=noClimH_sen, "noClimS.sen"=noClimS_sen, "shMax.sen"=shMax_sen,
+    "posGrH.tol"=posGrH_tol, "noClimH.tol"=noClimH_tol, "noClimS.tol"=noClimS_tol, "shMax.tol"=shMax_tol,
+    "posGrH.both"=posGrH_both, "noClimH.both"=noClimH_both, "noClimS.both"=noClimS_both, "shMax.both"=shMax_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# Store results in dataframe and set column types
+sim_bleached <- data.frame(results, row.names=NULL)
+sim_bleached <- transform(sim_bleached, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH.sen=as.logical(posGrH.sen), noClimH.sen=as.logical(noClimH.sen),
+  noClimS.sen=as.logical(noClimS.sen), shMax.sen=as.numeric(shMax.sen),
+  posGrH.tol=as.logical(posGrH.tol), noClimH.tol=as.logical(noClimH.tol),
+  noClimS.tol=as.logical(noClimS.tol), shMax.tol=as.numeric(shMax.tol),
+  posGrH.both=as.logical(posGrH.both), noClimH.both=as.logical(noClimH.both),
+  noClimS.both=as.logical(noClimS.both), shMax.both=as.numeric(shMax.both))
+```
+
+```{r candidate-rescue-cases, cache=TRUE, dependson=c("run-sims")}
+# Our new health measure (positive host growth & neither host nor symbionts are carbon-limited)
+sim_bleached$posGrH_noClimAll.sen <- (sim_bleached$posGrH.sen & sim_bleached$noClimH.sen & sim_bleached$noClimS.sen)
+sim_bleached$posGrH_noClimAll.tol <- (sim_bleached$posGrH.tol & sim_bleached$noClimH.tol & sim_bleached$noClimS.tol)
+sim_bleached$posGrH_noClimAll.both <- (sim_bleached$posGrH.both & sim_bleached$noClimH.both & sim_bleached$noClimS.both)
+
+sim_bleached$rescue_candidate.posGrH_noClimAll <- (!(sim_bleached$posGrH_noClimAll.sen) & sim_bleached$posGrH_noClimAll.both)
+sim_bleached$any_survival.posGrH_noClimAll <- (sim_bleached$posGrH_noClimAll.sen | sim_bleached$posGrH_noClimAll.tol | sim_bleached$posGrH_noClimAll.both)
+
+# Our old health measure (positive host growth)
+sim_bleached$rescue_candidate.posGrH <- (!(sim_bleached$posGrH.sen) & sim_bleached$posGrH.both)
+sim_bleached$any_survival.posGrH <- (sim_bleached$posGrH.sen | sim_bleached$posGrH.tol | sim_bleached$posGrH.both)
+
+# Either the new or old health measure
+sim_bleached$rescue_candidate.any <- (sim_bleached$rescue_candidate.posGrH | sim_bleached$rescue_candidate.posGrH_noClimAll)
+```
+
+```{r sim-candidate-rescue, cache=TRUE, dependson=c("set-bleached-pars", "run-sims", "candidate-rescue-cases")}
+# We'll run the simulations out longer to see which symbiont is most frequent.
+# Rescue occurs when the host cannot survive with the sensitive symbiont alone.
+# A host with both symbionts in the same environmental conditions can survive,
+# but becomes dominated by the sensitive symbiont.
+
+# Run the simulations for 600 days to let host & symbiont growth equilibrate
+time <-seq(0, 600, 0.1)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# stLogList will temporarily hold the log of the sensitive:tolerant symbiont ratio for the simulations
+stLogList <- foreach(i=1:nrow(sim_bleached), .inorder=TRUE) %dopar% {
+
+  # Only calculate the sensitive:tolerant ratio at 600 days if the simulation is a candidate for rescue
+  if(sim_bleached[i, "rescue_candidate.any"]) {
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(sim_bleached[i, "L"], sim_bleached[i, "L"], 0),
+      N=c(sim_bleached[i, "N"], sim_bleached[i, "N"], 0), X=c(sim_bleached[i, "X"], sim_bleached[i, "X"], 0))
+
+    # Simulate bleached hosts with both symbionts
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=initjHG, initjCP=initjCP_both)
+
+    # Record the log of the sensitive:tolerant symbiont ratio
+    stLog <- log(run_both$S.1[length(time)]) - log(run_both$S.2[length(time)])
+  } else {
+    stLog <- NA
+  }
+  stLog
+}
+
+stopCluster(cl) # stop the cluster
+
+sim_bleached$stLog <- as.numeric(stLogList)
+```
+
+```{r identify-rescue-cases, cache=TRUE, dependson=c("sim-candidate-rescue")}
+ sim_bleached$rescue.posGrH <- ((sim_bleached$stLog > 0) & (sim_bleached$rescue_candidate.posGrH))
+sim_bleached$rescue.posGrH_noClimAll <- ((sim_bleached$stLog > 0) & (sim_bleached$rescue_candidate.posGrH_noClimAll))
+```
