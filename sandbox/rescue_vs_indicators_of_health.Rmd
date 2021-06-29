@@ -1,0 +1,527 @@
+---
+title: "When do different indicators of recovery detect rescue?"
+author: "Alexandra Brown and Ross Cunning"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r set-options}
+# Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+# Load packages
+library("coRal")
+library("foreach")
+library("parallel")
+library("doParallel")
+library("MASS")
+library("adegenet")
+library("knitr")
+
+# Plot size for running this in-line
+options(repr.plot.res=240)
+
+# Load functions
+source("cn_limitation.R") # calculates carbon/nitrogen of biomass SU
+source("light_limitation.R")
+```
+
+# Simulate bleached hosts
+
+```{r set-bleached-pars, cache=TRUE}
+## Parameters for single-symbiont simulations ##
+
+# Sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+pars_sen$initS <- 1e-4
+
+# Tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+pars_tol$initS <- 1e-4
+
+## Parameters for two-symbiont simulations ##
+# Sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_both <- def_pars(nsym=2)
+pars_both$jCPm[2] <- 1.0
+pars_both$kROS[2] <- 250
+pars_both$jSGm[2] <- 0.15
+pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
+```
+
+```{r run-sims, cache=TRUE}
+## Run the simulations and record various possible indicators of a healthy host ##
+
+# run simulations for 100 days to determine survival
+time <-seq(0, 100, 0.1)
+
+
+# randomly draw environments to simulate corals in
+env_params <- data.frame("L"=runif(150000, 5, 60),       # Light, draw values between 5 and 60 mol photons/m^2/day
+                            "N"=10^runif(150000, -8, -5),     # Dissolved inorganic nitrogen, draw values between 10^-8 and 10^-5 mol/L
+                            "X" = 10^runif(150000, -8, -6.4))     # Food, draw values between 10^-8 and 10^-6.4 (about 4*10^-7) mol/L
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  # Simulate bleached hosts with sensitive, tolerant, or both symbionts
+  run_sen <- coRal::run_coral(time=time, env=env, pars=pars_sen)
+  run_tol <- coRal::run_coral(time=time, env=env, pars=pars_tol)
+  run_both <- coRal::run_coral(time=time, env=env, pars=pars_both)
+
+  # Calculate C-N limitation
+  cnlim_sen <- cn_limitation(run_sen, pars_sen)
+  cnlim_tol <- cn_limitation(run_tol, pars_tol)
+  cnlim_both <- cn_limitation(run_both, pars_both)
+
+  # Possible measures of recovery from bleaching:
+  # Host growth
+  posGrH_sen <- (run_sen$dH.Hdt[length(time)] > 0)
+  posGrH_tol <- (run_tol$dH.Hdt[length(time)] > 0)
+  posGrH_both <- (run_both$dH.Hdt[length(time)] > 0)
+
+  # Host not carbon-limited
+  noClimH_sen <- (cnlim_sen$H[length(time)] >= 0)
+  noClimH_tol <- (cnlim_tol$H[length(time)] >= 0)
+  noClimH_both <- (cnlim_both$H[length(time)] >= 0)
+
+  # Symbiont(s) not carbon-limited
+  noClimS_sen <- (cnlim_sen$S[length(time)] >= 0)
+  noClimS_tol <- (cnlim_tol$S[length(time)] >= 0)
+  noClimS_both <- ((cnlim_both$S.1[length(time)] >= 0) & (cnlim_both$S.2[length(time)] >= 0))
+
+  # Also record the maximum symbiont:host ratio (possible overshoot)
+  shMax_sen <- max(run_sen$S / run_sen$H)
+  shMax_tol <- max(run_tol$S / run_tol$H)
+  shMax_both <- max((run_both$S.1 + run_both$S.2) / run_both$H)
+
+
+  # Return the environmental parameters & possible measures of recovery from bleaching
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH.sen"=posGrH_sen, "noClimH.sen"=noClimH_sen, "noClimS.sen"=noClimS_sen, "shMax.sen"=shMax_sen,
+    "posGrH.tol"=posGrH_tol, "noClimH.tol"=noClimH_tol, "noClimS.tol"=noClimS_tol, "shMax.tol"=shMax_tol,
+    "posGrH.both"=posGrH_both, "noClimH.both"=noClimH_both, "noClimS.both"=noClimS_both, "shMax.both"=shMax_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# Store results in dataframe and set column types
+sim_bleached <- data.frame(results, row.names=NULL)
+sim_bleached <- transform(sim_bleached, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH.sen=as.logical(posGrH.sen), noClimH.sen=as.logical(noClimH.sen),
+  noClimS.sen=as.logical(noClimS.sen), shMax.sen=as.numeric(shMax.sen),
+  posGrH.tol=as.logical(posGrH.tol), noClimH.tol=as.logical(noClimH.tol),
+  noClimS.tol=as.logical(noClimS.tol), shMax.tol=as.numeric(shMax.tol),
+  posGrH.both=as.logical(posGrH.both), noClimH.both=as.logical(noClimH.both),
+  noClimS.both=as.logical(noClimS.both), shMax.both=as.numeric(shMax.both))
+```
+
+# Let's just take a quick look at the maximum symbiont:host ratios
+
+```{r plot-maxSH}
+# Make the histograms
+shMaxHist.sen <- hist(sim_bleached$shMax.sen, plot=FALSE, breaks=seq(0, 0.8, 0.05))
+shMaxHist.sen$density <- shMaxHist.sen$counts / sum(shMaxHist.sen$counts) * 100
+
+shMaxHist.tol <- hist(sim_bleached$shMax.tol, plot=FALSE, breaks=seq(0, 0.8, 0.05))
+shMaxHist.tol$density <- shMaxHist.tol$counts / sum(shMaxHist.tol$counts) * 100
+
+shMaxHist.both <- hist(sim_bleached$shMax.both, plot=FALSE, breaks=seq(0, 0.8, 0.05))
+shMaxHist.both$density <- shMaxHist.both$counts / sum(shMaxHist.both$counts) * 100
+
+# Plot the histograms
+par(mfrow=c(1, 2))
+
+# sensitive vs. tolerant
+plot(shMaxHist.sen, freq=FALSE, col="#648FFF40", ylim=c(0, 70),
+	xlab="Maximum symbiont:host ratio", ylab="% of simulations",
+	main="Max. S:H ratio in host w/ tolerant symbiont\nvs. sensitive alone")
+plot(shMaxHist.tol, add=TRUE, freq=FALSE, col="#FFB00040")
+
+legend("topright", c("Sensitive symbiont", "Tolerant symbiont"),
+  pt.bg=c("#648FFFC0", "#FFB000C0"), col="black", pch=22)
+
+# Sensitive alone vs. both symbionts
+plot(shMaxHist.sen, freq=FALSE, col="#648FFF40",  ylim=c(0, 70),
+	xlab="Maximum symbiont:host ratio", ylab="% of simulations",
+	main="Max. S:H ratio in host w/ both symbionts\nvs. sensitive alone")
+plot(shMaxHist.both, add=TRUE, freq=FALSE, col=rgb(0.25, 0.25, 0.25, 0.25))
+
+legend("topright", c("Sensitive symb. alone", "Both symbionts"),
+	pt.bg=c("#648FFFC0", rgb(0, 0, 0, 0.75)), col="black", pch=22)
+```
+
+# Next step: check for candidate cases of rescue
+Host does not return to "healthy" state after 100 days when it just has the sensitive symbiont.
+But it does when it has both symbionts.
+
+For now, we think both host and symbiont(s) not being carbon-limited is our best proxy.
+We'll check this against our previous measure of survival (positive host growth).
+
+```{r candidate-rescue-cases}
+# Our new health measure (positive host growth & neither host nor symbionts are carbon-limited)
+sim_bleached$posGrH_noClimAll.sen <- (sim_bleached$posGrH.sen & sim_bleached$noClimH.sen & sim_bleached$noClimS.sen)
+sim_bleached$posGrH_noClimAll.tol <- (sim_bleached$posGrH.tol & sim_bleached$noClimH.tol & sim_bleached$noClimS.tol)
+sim_bleached$posGrH_noClimAll.both <- (sim_bleached$posGrH.both & sim_bleached$noClimH.both & sim_bleached$noClimS.both)
+
+sim_bleached$rescue_candidate.posGrH_noClimAll <- (!(sim_bleached$posGrH_noClimAll.sen) & sim_bleached$posGrH_noClimAll.both)
+sim_bleached$any_survival.posGrH_noClimAll <- (sim_bleached$posGrH_noClimAll.sen | sim_bleached$posGrH_noClimAll.tol | sim_bleached$posGrH_noClimAll.both)
+
+# Our old health measure (positive host growth)
+sim_bleached$rescue_candidate.posGrH <- (!(sim_bleached$posGrH.sen) & sim_bleached$posGrH.both)
+sim_bleached$any_survival.posGrH <- (sim_bleached$posGrH.sen | sim_bleached$posGrH.tol | sim_bleached$posGrH.both)
+
+# Either the new or old health measure
+sim_bleached$rescue_candidate.any <- (sim_bleached$rescue_candidate.posGrH | sim_bleached$rescue_candidate.posGrH_noClimAll)
+```
+
+## New measure of health (positive host growth, no carbon limitation)
+
+* Fraction of simulations that might result in rescue: `r mean(sim_bleached$rescue_candidate.posGrH_noClimAll)`
+* Fraction of simulations where the host survived under any circumstances:
+  `r mean(sim_bleached$any_survival.posGrH_noClimAll)`
+* Possible rescue cases as fraction of "any survival" cases:
+  `r mean(sim_bleached$rescue_candidate.posGrH_noClimAll) / mean(sim_bleached$any_survival.posGrH_noClimAll)`
+
+
+## Positive host growth (old measure of health)
+
+* Fraction of simulations that might result in rescue: `r mean(sim_bleached$rescue_candidate.posGrH)`
+* Fraction of simulations where the host survived under any circumstances:
+  `r mean(sim_bleached$any_survival.posGrH)`
+* Possible rescue cases as fraction of "any survival" cases:
+  `r mean(sim_bleached$rescue_candidate.posGrH) / mean(sim_bleached$any_survival.posGrH)`
+
+# How many of the candidate cases are actually rescue?
+
+```{r sim-candidate-rescue, cache=TRUE, dependson=c("set-bleached-pars", "run-sims")}
+# We'll run the simulations out longer to see which symbiont is most frequent.
+# Rescue occurs when the host cannot survive with the sensitive symbiont alone.
+# A host with both symbionts in the same environmental conditions can survive,
+# but becomes dominated by the sensitive symbiont.
+
+# Run the simulations for 600 days to let host & symbiont growth equilibrate
+time <-seq(0, 600, 0.1)
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# stLogList will temporarily hold the log of the sensitive:tolerant symbiont ratio for the simulations
+stLogList <- foreach(i=1:nrow(sim_bleached), .inorder=TRUE) %dopar% {
+
+  # Only calculate the sensitive:tolerant ratio at 600 days if the simulation is a candidate for rescue
+  if(sim_bleached[i, "rescue_candidate.any"]) {
+    # Set up the environmental conditions
+    env <- coRal::init_env(time=time, L=c(sim_bleached[i, "L"], sim_bleached[i, "L"], 0),
+      N=c(sim_bleached[i, "N"], sim_bleached[i, "N"], 0), X=c(sim_bleached[i, "X"], sim_bleached[i, "X"], 0))
+
+    # Simulate bleached hosts with both symbionts
+    run_both <- coRal::run_coral(time=time, env=env, pars=pars_both)
+
+    # Record the log of the sensitive:tolerant symbiont ratio
+    stLog <- log(run_both$S.1[length(time)]) - log(run_both$S.2[length(time)])
+  } else {
+    stLog <- NA
+  }
+  stLog
+}
+
+stopCluster(cl) # stop the cluster
+
+sim_bleached$stLog <- as.numeric(stLogList)
+```
+
+```{r identify-rescue-cases, cache=TRUE, dependson=c("set-bleached-pars", "run-sims")}
+ sim_bleached$rescue.posGrH <- ((sim_bleached$stLog > 0) & (sim_bleached$rescue_candidate.posGrH))
+sim_bleached$rescue.posGrH_noClimAll <- ((sim_bleached$stLog > 0) & (sim_bleached$rescue_candidate.posGrH_noClimAll))
+```
+
+## Rescue cases: Positive host growth and no carbon limitation
+
+If we require positive host growth and no carbon limitation for a host to be counted as
+recovering from bleaching,  `r signif(sum(sim_bleached$rescue.posGrH_noClimAll) / nrow(sim_bleached) * 100, 3)`%
+of simulations showed rescue. (That's
+`r signif(sum(sim_bleached$rescue.posGrH_noClimAll) / sum(sim_bleached$any_survival.posGrH_noClimAll) * 100, 3)`% of cases where
+the host recovered from bleaching.)
+
+
+## Rescue cases: Postive host growth
+
+If host growth just needs to be positive to indicate recovery from bleaching,
+`r signif(sum(sim_bleached$rescue.posGrH) / nrow(sim_bleached) * 100, 3)`%
+of simulations showed rescue. (That's
+`r signif(sum(sim_bleached$rescue.posGrH) / sum(sim_bleached$any_survival.posGrH) * 100, 3)`% of cases where
+the host recovered from bleaching.)
+
+
+# Where do these cases of rescue fall in environmental parameter space?
+
+
+```{r classify-outcomes-posGrH, cache=TRUE, dependson=c("run-sims")}
+# Classify each simulation into the following categories (based on the "health" indicator of positive host growth)
+sim_bleached$outcomes.posGrH <- NA
+# 1. No survival, the host was not able to survive regardless of what symbionts it had
+sim_bleached$outcomes.posGrH[!(sim_bleached$any_survival.posGrH)] <- "No-survival"
+
+# 2. Survival with the sensitive symbiont alone but not the tolerant symbiont alone (not all hosts survived with both symbionts in this case)
+sim_bleached$outcomes.posGrH[sim_bleached$posGrH.sen & !(sim_bleached$posGrH.tol)] <- "S but not T"
+
+# 3. Survival with the tolerant symbiont alone but not the sensitive symbiont alone (many hosts did not survive with both symbionts in this case)
+# I am _very_ curious about what would happen if we initialized the "both symbionts" case with 1e-4 sensitive & tolerant symbionts each, instead of
+# a total of 1e-4. Would we find more cases of rescue?
+sim_bleached$outcomes.posGrH[!(sim_bleached$posGrH.sen) & sim_bleached$posGrH.tol] <- "T but not S"
+
+# 4. Survival with either the sensitive symbiont alone or the tolerant symbiont alone (a few hosts did not survive with both symbionts in this case)
+sim_bleached$outcomes.posGrH[sim_bleached$posGrH.sen & sim_bleached$posGrH.tol] <- "Either symbiont"
+
+# 5. Survival only with both symbionts
+sim_bleached$outcomes.posGrH[!(sim_bleached$posGrH.sen) & !(sim_bleached$posGrH.tol) & sim_bleached$posGrH.both] <- "Only both"
+
+# 5. Rescue cases (these will come out of the "tolerant alone" cases)
+#sim_bleached$outcomes.posGrH[!(sim_bleached$posGrH.sen) & sim_bleached$posGrH.both & (sim_bleached$stLog > 0)] <- "Rescue"
+
+sim_bleached$outcomes <- as.factor(sim_bleached$outcomes)
+# "Rescue" & "No survival", obviously
+# Survives w/ S. alone, survives w/ T. alone, survives w/ both?
+# The typical: survives w/ S. alone, survives w/ both (but it's not rescue)
+# How many do survive w/ just 1 symb? Are there any that survive w/ both but not 1? (yes, I think, I already checked that. It's rare, though)
+# "Just S" (blue), "Just T" (orange), "Both" (green), "Both, but only together" (another green?)(the last 2 should be shades of the same color)
+
+# Old classification of outcomes:
+sim_bleached$old_outcomes.posGrH <- NA
+sim_bleached$old_outcomes.posGrH[sim_bleached$posGrH.sen] <- "Sensitive-alone"
+sim_bleached$old_outcomes.posGrH[!(sim_bleached$posGrH.sen) & !(sim_bleached$posGrH.both)] <- "No-survival"
+sim_bleached$old_outcomes.posGrH[!(sim_bleached$posGrH.sen) & sim_bleached$posGrH.both & (sim_bleached$stLog < 0)] <- "Tolerant-dominates"
+sim_bleached$old_outcomes.posGrH[!(sim_bleached$posGrH.sen) & sim_bleached$posGrH.both & (sim_bleached$stLog >= 0)] <- "Rescue"
+
+sim_bleached$old_outcomes <- factor(sim_bleached$old_outcomes, levels=c("Sensitive-alone", "Tolerant-dominates", "Rescue", "No-survival"))
+```
+
+```{r run-dapc, cache=TRUE, dependson=c("run-sims", "classify-outcomes-posGrH")}
+dapc_sims <- sim_bleached[!is.na(sim_bleached$old_outcomes.posGrH),]
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X")], grp=dapc_sims$old_outcomes.posGrH, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 3, n.da = 3)
+mydapc
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+summary(mydapc)
+```
+
+```{r plot-dapc, cache=TRUE, dependson=c("run-dapc")}
+
+plot(mydapc$ind.coord[,"LD1"], mydapc$ind.coord[,"LD2"], col=c(rgb(0, 0, 0, 0.025), "#DC267F", "#648FFF0E", "#FFB000")[mydapc$grp], pch=c(0, 15, 1, 19)[mydapc$grp],
+  xlab="DAPC axis 1", ylab="DAPC axis 2")
+
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[1,1], y1=1.5*mydapc$var.load[1,2], length=0.1, col="white")
+text(x=1.5*mydapc$var.load[1,1], y=1.5*mydapc$var.load[1,2], labels="Light", pos=3, col="white")
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[2,1], y1=1.5*mydapc$var.load[2,2], length=0.1, col="white")
+text(x=1.5*mydapc$var.load[2,1], y=1.5*mydapc$var.load[2,2], labels="Nitrogen", pos=4, col="white")
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[3,1], y1=1.5*mydapc$var.load[3,2], length=0.1, col="white")
+text(x=1.5*mydapc$var.load[3,1], y=1.5*mydapc$var.load[3,2], labels="Food", pos=4, col="white", offset=1)
+
+legend("topright", c("Recovers w/ S.", "Recovers w/ T.", "Rescue", "No recovery"),
+col=c("#648FFF", "#FFB000", "#DC267F", rgb(0, 0, 0)), pch=c(1, 19, 15, 0),
+bg="white")
+```
+
+```{r run-dapc-posGrH, cache=TRUE, dependson=c("run-sims", "classify-outcomes-posGrH")}
+dapc_sims <- sim_bleached[!is.na(sim_bleached$outcomes.posGrH),]
+
+mydapc <- dapc(dapc_sims[, c("L", "N", "X")], grp=dapc_sims$outcomes.posGrH, var.contrib=TRUE, var.loadings=TRUE, scale = TRUE, n.pca = 3, n.da = 3)
+mydapc
+mydapc$loadings
+mydapc$var.load
+mydapc$pca.loadings
+summary(mydapc)
+```
+
+```{r plot-dapc-posGrH, cache=TRUE, dependson=c("run-dapc-posGrH")}
+
+plot(mydapc$ind.coord[,"LD1"], mydapc$ind.coord[,"LD2"], col=c("#00FABE0E", rgb(0, 0, 0, 0.025), "#DC267F", "#648FFF0E", "#FFB000")[mydapc$grp], pch=c(2, 0, 15, 1, 19)[mydapc$grp],
+  xlab="DAPC axis 1", ylab="DAPC axis 2")
+
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[1,1], y1=1.5*mydapc$var.load[1,2], length=0.1, col="white")
+text(x=1.5*mydapc$var.load[1,1], y=1.5*mydapc$var.load[1,2], labels="Light", pos=3, col="white")
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[2,1], y1=1.5*mydapc$var.load[2,2], length=0.1, col="white")
+text(x=1.5*mydapc$var.load[2,1], y=1.5*mydapc$var.load[2,2], labels="Nitrogen", pos=4, col="white")
+arrows(x0=0, y0=0, x1=1.5*mydapc$var.load[3,1], y1=1.5*mydapc$var.load[3,2], length=0.1, col="white")
+text(x=1.5*mydapc$var.load[3,1], y=1.5*mydapc$var.load[3,2], labels="Food", pos=4, col="white", offset=1)
+
+# legend("topright", c("Recovers w/ S.", "Recovers w/ T.", "Rescue", "No recovery"),
+# col=c("#648FFF", "#FFB000", "#DC267F", rgb(0, 0, 0)), pch=c(1, 19, 15, 0),
+# bg="white")
+```
+
+# What happens if we initialize the "both symbionts" case with more symbionts?
+
+Basically, we get more cases of potential rescue. Some of these are cases where the host did not survive
+at all before, so basically having 2x the normal amount of symbionts was probably what
+allowed survival (rather than just having another tolerant symbiont).
+However, not all cases were like that: in some the host had previously survived (presumably with the
+tolerant symbiont alone, otherwise the cases would already have been identified as rescue).
+
+So, maybe a better way to investigate would be to change the ratios of sensitive: tolerant symbionts
+while keeping the total symbionts the same.
+
+This does still run into another issue: sometimes hosts are able to survive with either symbiont alone but
+not with both at the same time. Is this still the case when we have lots of both symbionts?
+
+Pretty much, yes! Those cases _are_ rare to begin with, but increasing the total amount of symbionts
+doesn't seem to help in most of them. I think here having two symbionts somehow messes things up, not
+sure exactly how that would work, though.
+
+```{r bad-decision-investigation, cache=TRUE, dependson=c("set-bleached-pars", "run-sims")}
+## Run the simulations and record various possible indicators of a healthy host ##
+
+# run simulations for 100 days to determine survival
+time <-seq(0, 100, 0.1)
+
+# Set the parameters
+pars_both_high_initS <- pars_both
+pars_both_high_initS$initS <- c(1e-4, 1e-4)
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(sim_bleached[i, "L"], sim_bleached[i, "L"], 0),
+    N=c(sim_bleached[i, "N"], sim_bleached[i, "N"], 0), X=c(sim_bleached[i, "X"], sim_bleached[i, "X"], 0))
+
+  # Simulate bleached hosts with both symbionts
+  run_both <- coRal::run_coral(time=time, env=env, pars=pars_both_high_initS)
+
+  # Calculate C-N limitation
+  cnlim_both <- cn_limitation(run_both, pars_both_high_initS)
+
+  # Possible measures of recovery from bleaching:
+  posGrH_both <- (run_both$dH.Hdt[length(time)] > 0)
+
+  # Host not carbon-limited
+  noClimH_both <- (cnlim_both$H[length(time)] >= 0)
+
+  # Symbiont(s) not carbon-limited
+  noClimS_both <- ((cnlim_both$S.1[length(time)] >= 0) & (cnlim_both$S.2[length(time)] >= 0))
+
+  # Also record the maximum symbiont:host ratio (possible overshoot)
+  shMax_both <- max((run_both$S.1 + run_both$S.2) / run_both$H)
+
+
+  # Return the environmental parameters & possible measures of recovery from bleaching
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH.both"=posGrH_both, "noClimH.both"=noClimH_both, "noClimS.both"=noClimS_both, "shMax.both"=shMax_both)
+}
+
+stopCluster(cl) # stop the cluster
+
+# Store results in dataframe and set column types
+sim_high_initS <- data.frame(results, row.names=NULL)
+sim_high_initS <- transform(sim_high_initS, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH.both=as.logical(posGrH.both), noClimH.both=as.logical(noClimH.both),
+  noClimS.both=as.logical(noClimS.both), shMax.both=as.numeric(shMax.both))
+
+sim_high_initS$posGrH_noClimAll.both <- (sim_high_initS$posGrH.both & sim_high_initS$noClimH.both & sim_high_initS$noClimS.both)
+```
+
+
+```{r cache=TRUE}
+
+
+sum(sim_bleached$posGrH.sen & sim_bleached$posGrH.tol &
+	!(sim_bleached$posGrH.both))
+
+sum(sim_bleached$posGrH.sen & sim_bleached$posGrH.tol &
+	!(sim_high_initS$posGrH.both)) # WHATTTTTTTTTTTTTTTTTTTT
+
+
+
+sum(sim_bleached$posGrH_noClimAll.sen & sim_bleached$posGrH_noClimAll.tol &
+	!(sim_bleached$posGrH_noClimAll.both))
+
+sum(sim_bleached$posGrH_noClimAll.sen & sim_bleached$posGrH_noClimAll.tol &
+	!(sim_high_initS$posGrH_noClimAll.both))
+
+
+
+weird_cases.posGrH <- sim_bleached$posGrH.sen & sim_bleached$posGrH.tol &
+	!(sim_high_initS$posGrH.both)
+
+
+weird_env.posGrH <- sim_bleached[weird_cases.posGrH, c("L", "N", "X")]
+
+time <- seq(0, 200, 0.1)
+
+env <- init_env(time=time,
+	L=c(weird_env.posGrH[1, "L"], weird_env.posGrH[1, "L"], 0),
+	N=c(weird_env.posGrH[1, "N"], weird_env.posGrH[1, "N"], 0),
+	X=c(weird_env.posGrH[1, "X"], weird_env.posGrH[1, "X"], 0))
+
+run_sen <- run_coral(time, env, pars_sen)
+run_tol <- run_coral(time, env, pars_tol)
+run_both <- run_coral(time, env, pars_both)
+run_both_high_initS <- run_coral(time, env, pars_both_high_initS)
+
+par(mfrow=c(2, 2))
+
+plot(time[-1], run_sen$dH.Hdt[-1], type="l", col="blue", ylim=c(-0.02, 0.05),
+	xlab="time (days)", ylab="dH/Hdt", main="Host per capita growth rate\neach initS = 1e-4")
+lines(time[-1], run_tol$dH.Hdt[-1], col="orange")
+lines(time[-1], run_both_high_initS$dH.Hdt[-1], col="green")
+lines(time[-1], rep(0, length(time)-1), col=rgb(0, 0, 0, 0.25))
+legend("topleft", c("Sensitive symb. alone", "Tolerant symb. alone",
+	"Both symb."), col=c("blue", "orange", "green"), lty=1)
+
+plot(time[-1], run_sen$S[-1]/run_sen$H[-1], type="l", col="blue",
+	ylim=c(0, 0.9), 	xlab="time (days)", ylab="S/H",
+	main="Symbiont:host ratio\neach initS = 1e-4")
+lines(time[-1], run_tol$S[-1]/run_tol$H[-1], col="orange")
+lines(time[-1], run_both_high_initS$S.1[-1]/run_both_high_initS$H[-1], col="green")
+lines(time[-1], run_both_high_initS$S.2[-1]/run_both_high_initS$H[-1], col="darkgreen")
+legend("topleft", c("Sensitive symb. alone", "Tolerant symb. alone",
+	"S. symb. in host with both", "T. symb. in host with both"),
+	lty=1, col=c("blue", "orange", "green", "darkgreen"))
+
+
+
+####
+
+
+par(mfrow=c(2, 1))
+
+plot(time[-1], run_sen$dH.Hdt[-1], type="l", col="blue", ylim=c(-0.02, 0.05),
+	xlab="time (days)", ylab="dH/Hdt", main="Host per capita growth rate\ntotal initS = 1e-4")
+lines(time[-1], run_tol$dH.Hdt[-1], col="orange")
+lines(time[-1], run_both$dH.Hdt[-1], col="green")
+lines(time[-1], rep(0, length(time)-1), col=rgb(0, 0, 0, 0.25))
+legend("topleft", c("Sensitive symb. alone", "Tolerant symb. alone",
+	"Both symb."), col=c("blue", "orange", "green"), lty=1)
+
+plot(time[-1], run_sen$S[-1]/run_sen$H[-1], type="l", col="blue",
+	ylim=c(0, 0.9), 	xlab="time (days)", ylab="S/H",
+	main="Symbiont:host ratio\ntotal initS = 1e-4")
+lines(time[-1], run_tol$S[-1]/run_tol$H[-1], col="orange")
+lines(time[-1], run_both$S.1[-1]/run_both$H[-1], col="green")
+lines(time[-1], run_both$S.2[-1]/run_both$H[-1], col="darkgreen")
+legend("topleft", c("Sensitive symb. alone", "Tolerant symb. alone",
+	"S. symb. in host with both", "T. symb. in host with both"),
+	lty=1, col=c("blue", "orange", "green", "darkgreen"))
+
+```
