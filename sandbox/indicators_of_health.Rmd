@@ -1,6 +1,6 @@
 ---
 title: "Investigating possible indicators of coral recovery from bleaching"
-author: "Ross Cunning and Alexandra Brown"
+author: "Alexandra Brown and Ross Cunning"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 output:
       html_document:
@@ -28,9 +28,43 @@ source("cn_limitation.R") # calculates carbon/nitrogen of biomass SU
 source("light_limitation.R")
 ```
 
-# Simulate bleached hosts
+# Abstract
 
-## Set symbiont parameters
+We investigate 3 possible measures of a bleached host's return to health,
+as well as combinations of these measures:
+
+* Host has achieved positive growth at day 100 post-bleaching
+* Host is not carbon-limited at day 100 post-bleaching
+* Symbiont is not carbon-limited at day 100 post-bleaching
+
+We want to know:
+
+1. Do these measures often detect cases with high overshoot (symbiont:host ratio is very high)?
+    + High overshoot _might_ indicate the host isn't actually healthy
+2. Does the "recovery" process of healthy hosts look like the hosts are actually healthy?
+3. Do any indicators look they might be particularly helpful or redundant?
+
+We found:
+
+1. Overshoot
+    + Hosts that are not carbon-limited tend to not show extremely high symbiont:host ratios
+    + Even with all the indicators combined, we're still seeing cases with S:H ratio around 0.4
+    + I personally think this might be okay
+2. Recovery process (time series)
+    + Ask Ross; nothing looks terrible to me of the indicators I checked
+    + I checked positive growth, positive growth + host and/or symbiont not C-limited
+3. Particularly helpful/redundant indicators
+    + Host not carbon-limited on day 100 captures a range of S:H ratios that's neither too small
+      (possibly actually bleached) or too large (possible unrealistic overshoot)
+        - Hosts that are not carbon-limited nearly always also exhibit positive growth (99.9% of the time)
+        - Hosts in the sample simulations generally leave carbon limitation before symbionts
+    + Positive growth definitely seems conceptually important, if not as useful
+        - Hosts that exhibit positive growth frequently are not carbon-limited (90% of the time)
+        - Similarly, their symbionts are also generally not carbon-limited (95% of the time)
+    + Symbionts are frequently not carbon-limited
+        - Possibly symbionts not being carbon-limited is conceptually important, though
+
+# Simulate bleached hosts
 
 ```{r set-bleached-pars}
 ## Parameters for single-symbiont simulations ##
@@ -54,11 +88,9 @@ pars_both$jSGm[2] <- 0.15
 pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
 ```
 
-
-## Run the simulations
-Record various possible indicators of a healthy host
-
 ```{r run-sims, cache=TRUE}
+## Run the simulations and record various possible indicators of a healthy host ##
+
 # run simulations for 100 days to determine survival
 time <-seq(0, 100, 0.1)
 
@@ -87,34 +119,27 @@ results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %d
   cnlim <- cn_limitation(run, pars_both)
 
   # Calculate CO2-light limitation
-  cllim <- light_limitation(run, pars_both)
+  #cllim <- light_limitation(run, pars_both)
 
   # Possible measures of recovery from bleaching: host growth, host nitrogen limitation,
   # and lack of symbiont carbon limitation
-  posGrH <- any(run$dH.Hdt > 0) # is host growth positive?
-  NlimH <- any(cnlim$H > 0) # is host nitrogen-limited?
-  noClimS.1 <- any(cnlim$S.1 >= 0) # is the sensitive symb. NOT carbon-limited?
-  noClimS.2 <- any(cnlim$S.2 >= 0) # is the tolerant symb. NOT carbon-limited?
-  noClimS <- any((cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # are both symbionts NOT carbon-limited at the same time?
-  posGrH_NlimH <- any((run$dH.Hdt > 0) & (cnlim$H > 0)) # is the host both growing and nitrogen-limited at the same time?
-  posGrH_noClimS <- any((run$dH.Hdt > 0) & (cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # is the host growing at the same time both symbionts are NOT carbon-limited?
-  NlimH_noClimS <- any((cnlim$H > 0) & (cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # is the host nitrogen-limited at the same time both symbionts are NOT carbon-limited?
-  posGrH_NlimH_noClimS <- any((run$dH.Hdt > 0 ) & (cnlim$H > 0) & (cnlim$S.1 >= 0) & (cnlim$S.2 >= 0)) # is the host growing and nitrogen-limited at the same time both symbionts are NOT carbon-limited?
-
+  posGrH <- (run$dH.Hdt[length(time)] > 0) # is host growth positive?
+  noClimH <- (cnlim$H[length(time)] >= 0) # is host NOT carbon-limited?
+  noClimS.1 <- (cnlim$S.1[length(time)] >= 0) # is the sensitive symb. NOT carbon-limited?
+  noClimS.2 <- (cnlim$S.2[length(time)] >= 0) # is the tolerant symb. NOT carbon-limited?
+  shEnd <- (run$S.1[length(time)] + run$S.2[length(time)]) / run$H[length(time)]
+  shMax <- max((run$S.1 + run$S.2) / run$H)
 
   # Possible measures of recovery from bleaching: host growth and light-limited photosynthesis
-  lightLim.1 <- any(cllim$S.1 > 0)
-  lightLim.2 <- any(cllim$S.2 > 0)
-  lightLim <- any((cllim$S.1 > 0) & (cllim$S.2 > 0))
-  posGrH_lightLim <- any((run$dH.Hdt > 0) & (cllim$S.1 > 0) & (cllim$S.2 > 0))
+  # lightLim.1 <- any(cllim$S.1 > 0)
+  # lightLim.2 <- any(cllim$S.2 > 0)
+  # lightLim <- any((cllim$S.1 > 0) & (cllim$S.2 > 0))
+  # posGrH_lightLim <- any((run$dH.Hdt > 0) & (cllim$S.1 > 0) & (cllim$S.2 > 0))
 
   # Return the environmental parameters & possible measures of recovery from bleaching
   list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
-    "posGrH"=posGrH, "NlimH"=NlimH, "noClimS.1"=noClimS.1, "noClimS.2"=noClimS.2,
-    "noClimS"=noClimS, "posGrH_NlimH"=posGrH_NlimH, "posGrH_noClimS"=posGrH_noClimS,
-    "NlimH_noClimS"=NlimH_noClimS, "posGrH_NlimH_noClimS"=posGrH_NlimH_noClimS,
-    "lightLim.1"=lightLim.1, "lightLim.2"=lightLim.2, "lightLim"=lightLim,
-    "posGrH_lightLim"=posGrH_lightLim)
+    "posGrH"=posGrH, "noClimH"=noClimH, "noClimS.1"=noClimS.1, "noClimS.2"=noClimS.2,
+    "shEnd"=shEnd, "shMax"=shMax)
 }
 
 stopCluster(cl) # stop the cluster
@@ -125,21 +150,151 @@ sim_bleached <- lapply(sim_bleached, as.numeric)
 ```
 
 
-# How often did each indicator suggest positive growth?
-Note: positive growth here is just showing positive growth once. For previous simulations,
-I looked for positive growth at 100 days, which avoids the problem of everything being
-initialized with positive growth.
+# Summary stats
+## Possible indicators of health
 
-```{r summarize-indicators}
+What fraction of the time did each indicator label the host as healthy at day 100?
+
+```{r summarize-indicator-mean}
 sim_bleached <- as.data.frame(sim_bleached)
-indicators <- sim_bleached[, !(names(sim_bleached) %in% c("L", "X", "N"))]
-indicators <- lapply(indicators, mean)
-print(indicators)
+
+# The possible indicators of recovery to a "healthy state"
+indicators <- sim_bleached[, !(names(sim_bleached) %in% c("L", "X", "N", "shEnd", "shMax"))]
+
+# Add in combinations of the indicators
+indicators$noClimS <- indicators$noClimS.1 * indicators$noClimS.2
+indicators$posGrH_noClimH <- indicators$posGrH * indicators$noClimH
+indicators$posGrH_noClimS <- indicators$posGrH * indicators$noClimS
+indicators$noClimAll <- indicators$noClimH * indicators$noClimS
+indicators$posGrH_noClimAll <- indicators$posGrH * indicators$noClimAll
+
+# Get the mean for each indicator (fraction of times it indicated a healthy host)
+indicators_mean <- lapply(indicators, mean)
+print(indicators_mean)
+```
+
+## Symbiont:host ratio
+
+We have two measures of the symbiont:host ratio:
+the maximum symbiont:host ratio and the symbiont:host ratio at 100 days.
+
+These could theoretically answer slightly different questions
+
+1. How high is the overshoot in corals that ultimately end up healthy vs not?
+2. Do some host declared healthy actually have a really high symbiont:host ratio?
+
+However, they're both pretty much the same.
+
+```{r summarize-maxSH}
+print("Maximum S:H ratio summary statistics")
+print(summary(sim_bleached$shMax))
+
+print("S:H ratio at 100 days summary statistics")
+print(summary(sim_bleached$shEnd))
+
+print("Fraction of cases where maximum S:H ratio and S:H ratio at 100 days are equal")
+print(sum(sim_bleached$shMax == sim_bleached$shEnd)/nrow(sim_bleached))
+```
+
+# Distribution of maximum symbiont:host ratio (possible overshoot) for each indicator of health
+Distribution of maximum S:H ratio for all simulations in gray for comparison.
+
+```{r function-plotIndicatorHist}
+# This function will plot a histogram of the data (ideally the S:H ratios that meet a particular health indicator)
+# overlaid on a second pre-made histogram for comparison (comparisonHist)
+
+plotIndicatorHist <- function(data, comparisonHist, title, xlab, ylab, ...) {
+  plotargs <- list(...)
+
+	# Make the histogram for the indicator
+	indicatorHist <- hist(data, breaks=comparisonHist$breaks, plot=FALSE)
+
+	# Set bar heights to be the % of the simulations which the indicator deems healthy (i.e. nrow(data))
+	indicatorHist$density <- indicatorHist$counts / sum(indicatorHist$counts) * 100
+
+	# Plot the comparison histogram
+	do.call(plot, c(list(comparisonHist, freq=FALSE, col=rgb(0, 0, 0, 0.25), main=title, xlab=xlab, ylab=ylab), plotargs))
+
+	# Plot indicator histogram
+	plot(indicatorHist, add=TRUE, freq=FALSE, col="#648FFF40")
+
+	# Add a legend
+	legend("topright", c("All simulations", title), pt.bg=c(rgb(0, 0, 0, 0.75), "#648FFFC0"), col="black", pch=22)
+}
+
 
 ```
 
+```{r shMax-histograms}
+# Histogram of maximum S:H ratio for all simulations
+shMaxHist <- hist(sim_bleached$shMax, plot=FALSE)
+breaks <- shMaxHist$breaks
+shMaxHist$density <- shMaxHist$counts / sum(shMaxHist$counts) * 100
 
-# Selected simulations for various indicators
+par(mfrow=c(2,2))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH == 1], comparison=shMaxHist,
+  title="Positive host growth", xlab="S:H ratio", ylab="# simulations")
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimH == 1], comparison=shMaxHist,
+  title="Host is not carbon-limited", xlab="S:H ratio", ylab="# simulations")
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimS == 1], comparison=shMaxHist,
+  title="Symbionts are not C-limited", xlab="S:H ratio", ylab="# simulations", ylim=c(0, 80))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimH == 1], comparison=shMaxHist,
+  title="Host is growing & not C-lim.", xlab="S:H ratio", ylab="# simulations")
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimS == 1], comparison=shMaxHist,
+  title="Host is growing & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations")
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimAll == 1], comparison=shMaxHist,
+  title="Neither host nor symbs. are C-lim.", xlab="S:H ratio", ylab="# simulations")
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimAll == 1], comparison=shMaxHist,
+  title="Host is growing, host & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations")
+```
+
+## Zoom in on high S:H region of the above histograms
+
+```{r high-shMax-histograms}
+# Histogram of maximum S:H ratio for all simulations
+shMaxHist <- hist(sim_bleached$shMax, plot=FALSE)
+breaks <- shMaxHist$breaks
+shMaxHist$density <- shMaxHist$counts / sum(shMaxHist$counts) * 100
+
+par(mfrow=c(2,2))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH == 1], comparison=shMaxHist,
+  title="Positive host growth", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimH == 1], comparison=shMaxHist,
+  title="Host is not carbon-limited", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimS == 1], comparison=shMaxHist,
+  title="Symbionts are not C-limited", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimH == 1], comparison=shMaxHist,
+  title="Host is growing & not C-lim.", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimS == 1], comparison=shMaxHist,
+  title="Host is growing & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimAll == 1], comparison=shMaxHist,
+  title="Neither host nor symbs. are C-lim.", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimAll == 1], comparison=shMaxHist,
+  title="Host is growing, host & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+```
+
+# Selected simulations that show different indicators of health
 
 ## Positive host growth
 
@@ -164,47 +319,49 @@ niceplots <- function(run, pars, i) {
 
   # Find the min and max values of the things we'll plot
   mincnlim <- min(unlist(lapply(cnlim, min)), 0)
-  maxcnlim <- min(unlist(lapply(cnlim, max)), 0)
+  maxcnlim <- max(unlist(lapply(cnlim, max)), 0)
 
   mincllim <- min(unlist(lapply(cllim, min)), 0)
-  maxcllim <- min(unlist(lapply(cllim, max)), 0)
+  maxcllim <- max(unlist(lapply(cllim, max)), 0)
 
   minSH <- min(run$S.1/run$H, run$S.2/run$H)
   maxSH <- max(run$S.1/run$H, run$S.2/run$H)
 
-  minGr <- min(run$dH.Hdt, 0)
-  maxGr <- max(run$dH.Hdt, 0)
+  minGr <- min(run$dH.Hdt[-1], 0)
+  maxGr <- max(run$dH.Hdt[-1], 0)
 
   # Plot host growth rate
-  plot(run$time, rep(0, length(run$time)), type="l", col="gray", ylim=c(minGr, maxGr),
+  plot(run$time[-1], rep(0, length(run$time)-1), type="l", col="gray", ylim=c(minGr, maxGr),
     main=paste0("Sim ", i, ": dH/Hdt"), xlab="time (days)", ylab="dH/Hdt") # Put a line at gr = 0
-  lines(run$time, run$dH.Hdt)
+  lines(run$time[-1], run$dH.Hdt[-1])
 
   # Plot symbiont/host ratio
-  plot(time, run$S.1/run$H, type="l", col="#648FFF", xlab="time (days)", ylab="S/H ratio",
-    main=paste0("Sim ", i, ": S/H"), ylim=c(minSH, maxSH), log="y")
+  plot(run$time[-1], run$S.1[-1]/run$H[-1], type="l", col="#648FFF", xlab="time (days)", ylab="S/H ratio",
+    main=paste0("Sim ", i, ": S/H"), ylim=c(minSH, maxSH))
   lines(time, run$S.2/run$H, col="#FFB000")
 
   # Plot C/N limitation
-  plot(run$time, cnlim$S.1, type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
+  plot(run$time[-1], cnlim$S.1[-1], type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
       main=paste0("Sim ", i, ": C/N lim"), ylim=c(mincnlim, maxcnlim))
   lines(time, cnlim$S.2, col="#FFB000")
   lines(time, cnlim$H, col="black")
 
   # Plot CO2/light limitation
-  plot(run$time, cllim$S.1, type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
-      main=paste0("Sim ", i, ": Light lim"), ylim=c(mincllim, maxcllim))
-  lines(time, cllim$S.2, col="#FFB000")
+  # plot(run$time[-1], cllim$S.1[-1], type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
+  #     main=paste0("Sim ", i, ": Light lim"), ylim=c(mincllim, maxcllim))
+  # lines(time, cllim$S.2, col="#FFB000")
 }
 ```
 
+## Host shows positive growth
 
-## Host N-limitation
+```{r timeseries-posGrH}
+par(mfrow=c(4, 3))
 
-```{r}
-par(mfrow=c(4, 4))
-sims <- seq(1:nrow(sim_bleached))[sim_bleached$NlimH == 1]
-sims <- sample(sims, min(8, nrow(sims)))
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[(indicators$posGrH == 1)]
+sims <- sample(sims, min(4, nrow(sims)))
 sims <- sort(sims)
 
 for (i in sims) {
@@ -218,19 +375,50 @@ for (i in sims) {
   niceplots(run, pars_both, i)
 
   if (i == min(sims)) {
-    legend("left", c("S. symb", "T. symb", "host"), col=c("#648FFF", "#FFB000", "black"),
+    legend("bottomright", c("S. symb", "T. symb", "host"), col=c("#648FFF", "#FFB000", "black"),
+      lty=1)
+  }
+}
+```
+
+### Host shows positive growth, but NOT the other indicators (i.e. host & symbs are C-limited)
+
+```{r timeseries-posGrH-ONLY}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[((indicators$posGrH == 1) & (!indicators$noClimH == 1) & !(indicators$noClimS.1 == 1) & !(indicators$noClimS.2 == 1))]
+sims <- sample(sims, min(4, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+
+  if (i == min(sims)) {
+    legend("bottomright", c("S. symb", "T. symb", "host"), col=c("#648FFF", "#FFB000", "black"),
       lty=1)
   }
 }
 ```
 
 
-## Host N-limitation & symbiont C-limitation
+## Host is growing and not carbon-limited
 
-```{r}
-par(mfrow=c(4, 4))
-sims <- seq(1:nrow(sim_bleached))[sim_bleached$NlimH_noClimS == 1]
-sims <- sample(sims, min(8, nrow(sims)))
+```{r timeseries-posGrH-noClimH}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[(indicators$posGrH_noClimH == 1)]
+sims <- sample(sims, min(4, nrow(sims)))
 sims <- sort(sims)
 
 for (i in sims) {
@@ -245,12 +433,28 @@ for (i in sims) {
 }
 ```
 
-## Host N-limitation & symbiont C-limitation & positive host growth
 
-```{r}
-par(mfrow=c(4, 4))
-sims <- seq(1:nrow(sim_bleached))[sim_bleached$posGrH_NlimH_noClimS == 1]
-sims <- sample(sims, min(8, nrow(sims)))
+### Host is growing and not carbon-limited, but symbionts ARE carbon-limited
+This doesn't happen in this set of simulations!
+
+```{r posGrH-noClimH-ONLY}
+
+print("Simulations where host is growing & not C-limited but symbionts ARE C-limited")
+print(sum((indicators$posGrH_noClimH==1) & !(indicators$noClimS.1 == 1) & !(indicators$noClimS.2 == 1)))
+
+```
+
+
+
+## Host is growing, symbionts are not carbon-limited
+
+```{r timeseries-posGrH-noClimS}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[(indicators$posGrH_noClimS == 1)]
+sims <- sample(sims, min(4, nrow(sims)))
 sims <- sort(sims)
 
 for (i in sims) {
@@ -265,12 +469,15 @@ for (i in sims) {
 }
 ```
 
-## Light limitation & positive host growth
+### Host is growing, symbionts are not carbon-limited, but host IS carbon-limited
 
-```{r}
-par(mfrow=c(4, 4))
-sims <- seq(1:nrow(sim_bleached))[sim_bleached$posGrH_lightLim == 1]
-sims <- sample(sims, min(8, nrow(sims)))
+```{r timeseries-posGrH-noClimS-ONLY}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[((indicators$posGrH_noClimS == 1) & !(indicators$noClimH == 1))]
+sims <- sample(sims, min(4, nrow(sims)))
 sims <- sort(sims)
 
 for (i in sims) {
@@ -284,3 +491,35 @@ for (i in sims) {
   niceplots(run, pars_both, i)
 }
 ```
+
+
+## Host is growing, hosts and symbiont are not carbon-limited
+
+```{r timeseries-posGrH-noClimAll}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[(indicators$posGrH_noClimAll == 1)]
+sims <- sample(sims, min(12, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+}
+```
+
+# Next steps
+The next step (in another document) is to look at the cases of rescue these indicators detect.
+
+* How many cases do they detect?
+* How consistent are cases detected by different indicators?
+* Do we think the cases they're detecting are good representations of "real" rescue?
+* What can the dynamics of the rescue cases tell us about the cause of rescue?
