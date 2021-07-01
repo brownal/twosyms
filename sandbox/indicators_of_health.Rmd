@@ -25,7 +25,8 @@ options(repr.plot.res=240)
 
 # Load functions
 source("cn_limitation.R") # calculates carbon/nitrogen of biomass SU
-source("light_limitation.R")
+source("synth.R") # synthesizing unit (used in run_coral_initFluxes)
+source("run_coral_initFluxes.R") # run_coral with user-defined initialization of host growth and photosynthesis
 ```
 
 # Abstract
@@ -66,7 +67,7 @@ We found:
 
 # Simulate bleached hosts
 
-```{r set-bleached-pars}
+```{r set-bleached-pars, cache=TRUE}
 ## Parameters for single-symbiont simulations ##
 # Sensitive symb. parameters
 pars_sen <- def_pars(nsym=1)
@@ -86,9 +87,14 @@ pars_both$jCPm[2] <- 1.0
 pars_both$kROS[2] <- 250
 pars_both$jSGm[2] <- 0.15
 pars_both$initS[1:2] <- c(0.5e-4, 0.5e-4)
+
+## initial fluxes ##
+initjHG <- 0
+initjCP_single <- 0
+initjCP_both <- c(0, 0)
 ```
 
-```{r run-sims, cache=TRUE}
+```{r run-sims, cache=TRUE, dependson=c("set-bleached-pars")}
 ## Run the simulations and record various possible indicators of a healthy host ##
 
 # run simulations for 100 days to determine survival
@@ -113,40 +119,47 @@ results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %d
     N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
 
   # Run the simulation
-  run <- coRal::run_coral(time=time, env=env, pars=pars_both)
+  run <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=initjHG, initjCP=initjCP_both)
 
   # Calculate C-N limitation
   cnlim <- cn_limitation(run, pars_both)
 
-  # Calculate CO2-light limitation
-  #cllim <- light_limitation(run, pars_both)
+  # Possible measures of recovery from bleaching and return to functional symbiosis:
+  #host growth, lack of symbiont carbon limitation, symbiont carbon sharing, photosynthesis
+  posGrH <- (run$dH.Hdt[length(time)] > 0) # Is host growth positive?
+  noClimH <- (cnlim$H[length(time)] >= 0) # Is host NOT carbon-limited?
+  noClimS.1 <- (cnlim$S.1[length(time)] >= 0) # Is the sensitive symb. NOT carbon-limited?
+  noClimS.2 <- (cnlim$S.2[length(time)] >= 0) # Is the tolerant symb. NOT carbon-limited?
+  rhoC.1 <- run$rhoC.1[length(time)] # The carbon the sensitive symb. shares with the host
+  rhoC.2 <- run$rhoC.2[length(time)] # The carbon the tolerant symb. shares with the host
+  rhoC.tot <- (run$rhoC.1[length(time)] * run$S.1[length(time)] + run$rhoC.2[length(time)] * run$S.2[length(time)]) / run$H[length(time)] # Carbon shared per unit host
+  jCP.1 <- run$jCP.1[length(time)] # The sensitive symb.'s photosynthetic rate
+  jCP.2 <- run$jCP.2[length(time)] # The tolerant symb.'s photosynthetic rate
 
-  # Possible measures of recovery from bleaching: host growth, host nitrogen limitation,
-  # and lack of symbiont carbon limitation
-  posGrH <- (run$dH.Hdt[length(time)] > 0) # is host growth positive?
-  noClimH <- (cnlim$H[length(time)] >= 0) # is host NOT carbon-limited?
-  noClimS.1 <- (cnlim$S.1[length(time)] >= 0) # is the sensitive symb. NOT carbon-limited?
-  noClimS.2 <- (cnlim$S.2[length(time)] >= 0) # is the tolerant symb. NOT carbon-limited?
-  shEnd <- (run$S.1[length(time)] + run$S.2[length(time)]) / run$H[length(time)]
-  shMax <- max((run$S.1 + run$S.2) / run$H)
-
-  # Possible measures of recovery from bleaching: host growth and light-limited photosynthesis
-  # lightLim.1 <- any(cllim$S.1 > 0)
-  # lightLim.2 <- any(cllim$S.2 > 0)
-  # lightLim <- any((cllim$S.1 > 0) & (cllim$S.2 > 0))
-  # posGrH_lightLim <- any((run$dH.Hdt > 0) & (cllim$S.1 > 0) & (cllim$S.2 > 0))
+  # Other useful summary statistics
+  shEnd <- (run$S.1[length(time)] + run$S.2[length(time)]) / run$H[length(time)] # Final symbiont:host ratio
+  shMax <- max((run$S.1 + run$S.2) / run$H) # Maximum symbiont:host ratio
+  posGrS.1 <- (run$dS.Sdt.1[length(time)] > 0) # Is the sensitive symb. growing?
+  posGrS.2 <- (run$dS.Sdt.2[length(time)] > 0) # Is the tolerant symb. growing?
 
   # Return the environmental parameters & possible measures of recovery from bleaching
   list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
     "posGrH"=posGrH, "noClimH"=noClimH, "noClimS.1"=noClimS.1, "noClimS.2"=noClimS.2,
-    "shEnd"=shEnd, "shMax"=shMax)
+    "rhoC.1"=rhoC.1, "rhoC.2"=rhoC.2, "rhoC.tot"=rhoC.tot, "jCP.1"=jCP.1, "jCP.2"=jCP.2,
+    "shEnd"=shEnd, "shMax"=shMax, "posGrS.1"=posGrS.2, "posGrS.2"=posGrS.2)
 }
 
 stopCluster(cl) # stop the cluster
 
 # Store results in dataframe, as type numeric
 sim_bleached <- data.frame(results, row.names=NULL)
-sim_bleached <- lapply(sim_bleached, as.numeric)
+sim_bleached <- transform(sim_bleached, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH=as.logical(posGrH), noClimH=as.logical(noClimH),
+  noClimS.1=as.logical(noClimS.1), noClimS.2=as.logical(noClimS.2),
+  rhoC.1=as.numeric(rhoC.1), rhoC.2=as.numeric(rhoC.2), rhoC.tot=as.numeric(rhoC.tot),
+  jCP.1=as.numeric(jCP.1), jCP.2=as.numeric(jCP.2),
+  shEnd=as.numeric(shEnd), shMax=as.numeric(shMax),
+  posGrS.1=as.logical(posGrS.1), posGrS.2=as.logical(posGrS.2))
 ```
 
 
@@ -155,11 +168,12 @@ sim_bleached <- lapply(sim_bleached, as.numeric)
 
 What fraction of the time did each indicator label the host as healthy at day 100?
 
-```{r summarize-indicator-mean}
+```{r summarize-indicator-mean, cache=TRUE, dependson=c("run-sims")}
 sim_bleached <- as.data.frame(sim_bleached)
 
 # The possible indicators of recovery to a "healthy state"
-indicators <- sim_bleached[, !(names(sim_bleached) %in% c("L", "X", "N", "shEnd", "shMax"))]
+indicators <- sim_bleached[, !(names(sim_bleached) %in%
+  c("L", "X", "N", "rhoC.1", "rhoC.2", "rhoC.tot", "jCP.1", "jCP.2", "shEnd", "shMax"))]
 
 # Add in combinations of the indicators
 indicators$noClimS <- indicators$noClimS.1 * indicators$noClimS.2
@@ -167,6 +181,11 @@ indicators$posGrH_noClimH <- indicators$posGrH * indicators$noClimH
 indicators$posGrH_noClimS <- indicators$posGrH * indicators$noClimS
 indicators$noClimAll <- indicators$noClimH * indicators$noClimS
 indicators$posGrH_noClimAll <- indicators$posGrH * indicators$noClimAll
+
+indicators <- transform(indicators, noClimS=as.logical(noClimS), posGrH_noClimH=as.logical(posGrH_noClimH),
+  posGrH_noClimS=as.logical(posGrH_noClimS), noClimAll=as.logical(noClimAll),
+  posGrH_noClimAll=as.logical(posGrH_noClimAll))
+
 
 # Get the mean for each indicator (fraction of times it indicated a healthy host)
 indicators_mean <- lapply(indicators, mean)
@@ -201,7 +220,7 @@ Distribution of maximum S:H ratio for all simulations in gray for comparison.
 
 ```{r function-plotIndicatorHist}
 # This function will plot a histogram of the data (ideally the S:H ratios that meet a particular health indicator)
-# overlaid on a second pre-made histogram for comparison (comparisonHist)
+# overlaid on a second histogram for comparison (comparisonHist)
 
 plotIndicatorHist <- function(data, comparisonHist, title, xlab, ylab, ...) {
   plotargs <- list(...)
@@ -211,6 +230,7 @@ plotIndicatorHist <- function(data, comparisonHist, title, xlab, ylab, ...) {
 
 	# Set bar heights to be the % of the simulations which the indicator deems healthy (i.e. nrow(data))
 	indicatorHist$density <- indicatorHist$counts / sum(indicatorHist$counts) * 100
+  comparisonHist$density <- comparisonHist$counts / sum(comparisonHist$counts) * 100
 
 	# Plot the comparison histogram
 	do.call(plot, c(list(comparisonHist, freq=FALSE, col=rgb(0, 0, 0, 0.25), main=title, xlab=xlab, ylab=ylab), plotargs))
@@ -222,37 +242,65 @@ plotIndicatorHist <- function(data, comparisonHist, title, xlab, ylab, ...) {
 	legend("topright", c("All simulations", title), pt.bg=c(rgb(0, 0, 0, 0.75), "#648FFFC0"), col="black", pch=22)
 }
 
+```
 
+```{r function-plotComparisonHist}
+# This function will plot a histogram of two datasets so their distributions can be compared
+# Bin heights reflect the percent of total data points in that data set in the group (so if
+# one group has more points than the other, their distributions can still be compared)
+
+plotComparisonHist <- function(data1, data2, data1name, data2name, title, xlab, ylab, ...) {
+  plotargs <- list(...)
+
+	# Make the histogram for the data as a whole (to get breakpoints)
+	allHist <- hist(c(data1, data2), plot=FALSE)
+
+  # Make the histograms for the datasets
+  data1Hist <- hist(data1, breaks=allHist$breaks, plot=FALSE)
+  data2Hist <- hist(data2, breaks=allHist$breaks, plot=FALSE)
+
+	# Set bar heights to be the % of the data points (i.e. nrow(data))
+	data1Hist$density <- data1Hist$counts / sum(data1Hist$counts) * 100
+  data2Hist$density <- data2Hist$counts / sum(data2Hist$counts) * 100
+
+	# Plot the histogram of data set 1
+	do.call(plot, c(list(data1Hist, freq=FALSE, col="#648FFF40",
+    main=title, xlab=xlab, ylab=ylab), plotargs))
+
+	# Plot the histogram of data set 1
+	plot(data2Hist, add=TRUE, freq=FALSE, col=rgb(0, 0, 0, 0.25))
+
+	# Add a legend
+	legend("topright", c(data1name, data2name), pt.bg=c("#648FFFC0", rgb(0, 0, 0, 0.75)), col="black", pch=22)
+}
 ```
 
 ```{r shMax-histograms}
 # Histogram of maximum S:H ratio for all simulations
 shMaxHist <- hist(sim_bleached$shMax, plot=FALSE)
-breaks <- shMaxHist$breaks
-shMaxHist$density <- shMaxHist$counts / sum(shMaxHist$counts) * 100
 
 par(mfrow=c(2,2))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH == 1], comparison=shMaxHist,
-  title="Positive host growth", xlab="S:H ratio", ylab="# simulations")
+  title="Positive host growth", xlab="S:H ratio", ylab="% simulations")
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimH == 1], comparison=shMaxHist,
-  title="Host is not carbon-limited", xlab="S:H ratio", ylab="# simulations")
+  title="Host is not carbon-limited", xlab="S:H ratio", ylab="% simulations")
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimS == 1], comparison=shMaxHist,
-  title="Symbionts are not C-limited", xlab="S:H ratio", ylab="# simulations", ylim=c(0, 80))
+  title="Symbionts are not C-limited", xlab="S:H ratio", ylab="% simulations", ylim=c(0, 80))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimH == 1], comparison=shMaxHist,
-  title="Host is growing & not C-lim.", xlab="S:H ratio", ylab="# simulations")
+  title="Host is growing & not C-lim.", xlab="S:H ratio", ylab="% simulations")
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimS == 1], comparison=shMaxHist,
-  title="Host is growing & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations")
+  title="Host is growing & symbs. are not C-lim.", xlab="S:H ratio", ylab="% simulations")
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimAll == 1], comparison=shMaxHist,
-  title="Neither host nor symbs. are C-lim.", xlab="S:H ratio", ylab="# simulations")
+  title="Neither host nor symbs. are C-lim.", xlab="S:H ratio", ylab="% simulations")
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimAll == 1], comparison=shMaxHist,
-  title="Host is growing, host & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations")
+  title="Host is growing, host & symbs. are not C-lim.", xlab="S:H ratio", ylab="% simulations")
 ```
 
 ## Zoom in on high S:H region of the above histograms
@@ -260,38 +308,198 @@ plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimAll == 1], com
 ```{r high-shMax-histograms}
 # Histogram of maximum S:H ratio for all simulations
 shMaxHist <- hist(sim_bleached$shMax, plot=FALSE)
-breaks <- shMaxHist$breaks
-shMaxHist$density <- shMaxHist$counts / sum(shMaxHist$counts) * 100
 
 par(mfrow=c(2,2))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH == 1], comparison=shMaxHist,
-  title="Positive host growth", xlab="S:H ratio", ylab="# simulations",
+  title="Positive host growth", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimH == 1], comparison=shMaxHist,
-  title="Host is not carbon-limited", xlab="S:H ratio", ylab="# simulations",
+  title="Host is not carbon-limited", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimS == 1], comparison=shMaxHist,
-  title="Symbionts are not C-limited", xlab="S:H ratio", ylab="# simulations",
+  title="Symbionts are not C-limited", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimH == 1], comparison=shMaxHist,
-  title="Host is growing & not C-lim.", xlab="S:H ratio", ylab="# simulations",
+  title="Host is growing & not C-lim.", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimS == 1], comparison=shMaxHist,
-  title="Host is growing & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations",
+  title="Host is growing & symbs. are not C-lim.", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$noClimAll == 1], comparison=shMaxHist,
-  title="Neither host nor symbs. are C-lim.", xlab="S:H ratio", ylab="# simulations",
+  title="Neither host nor symbs. are C-lim.", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
 
 plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimAll == 1], comparison=shMaxHist,
-  title="Host is growing, host & symbs. are not C-lim.", xlab="S:H ratio", ylab="# simulations",
+  title="Host is growing, host & symbs. are not C-lim.", xlab="S:H ratio", ylab="% simulations",
   xlim=c(0.3, 0.7), ylim=c(0, 10))
+```
+
+# Carbon sharing as a proxy for functional symbiosis
+I looked into carbon sharing (rhoC in the model, units of carbon shared per C-mol symbiont).
+Both carbon shared as a fraction of carbon fixed by photosynthesis (jCP, units of carbon fixed per C-mol symbiont)
+and total carbon shared as a fraction of host biomass show obviously different distributions
+when host growth is positive, and when carbon limitation is also absent.
+
+This suggests that I could potentially use carbon sharing as a measure of a functional symbiosis.
+However, it's not clear to me how to define the required amount of carbon sharing
+in some sort of principled way.
+
+## Carbon shared out of total carbon fixed
+
+```{r carbon-shared-fixed-histograms}
+par(mfrow=c(2,2))
+
+## Histograms comparing carbon shared for all simulations vs. just those that meet
+# a particular "indicator" of health
+
+# Positive host growth, sensitive symbiont carbon shared
+plotIndicatorHist((sim_bleached$rhoC.1/sim_bleached$jCP.1)[indicators$posGrH],
+	hist(sim_bleached$rhoC.1/sim_bleached$jCP.1, plot=FALSE),
+	"Positive host growth", "Sensitive symb: C shared out of C fixed", "% of simulations",
+	xlim=c(0, 1), ylim=c(0, 70))
+
+# Positive host growth, tolerant symbiont carbon shared
+plotIndicatorHist((sim_bleached$rhoC.2/sim_bleached$jCP.2)[indicators$posGrH],
+	hist(sim_bleached$rhoC.2/sim_bleached$jCP.2, plot=FALSE),
+	"Positive host growth", "Tolerant symb: C shared out of C fixed", "% of simulations",
+	xlim=c(0, 1), ylim=c(0, 70))
+
+# Positive host growth AND no carbon limitation, sensitive symbiont carbon shared
+plotIndicatorHist((sim_bleached$rhoC.1/sim_bleached$jCP.1)[indicators$posGrH_noClimAll],
+	hist(sim_bleached$rhoC.1/sim_bleached$jCP.1, plot=FALSE),
+	"Positive host growth, no C-lim", "Sensitive symb: C shared out of C fixed", "% of simulations",
+	xlim=c(0, 1), ylim=c(0, 70))
+
+# Positive host growth AND no carbon limitation, tolerant symbiont carbon shared
+plotIndicatorHist((sim_bleached$rhoC.2/sim_bleached$jCP.2)[indicators$posGrH_noClimAll],
+	hist(sim_bleached$rhoC.2/sim_bleached$jCP.2, plot=FALSE),
+	"Positive host growth, no C-lim", "Tolerant symb: C shared out of C fixed", "% of simulations",
+	xlim=c(0, 1), ylim=c(0, 70))
+
+## Histograms comparing carbon shared for simulations that meet a particular "indicator" of health
+# vs. those that do not
+
+# Positive host growth, sensitive symbiont carbon shared
+plotComparisonHist((sim_bleached$rhoC.1/sim_bleached$jCP.1)[indicators$posGrH],
+	(sim_bleached$rhoC.1/sim_bleached$jCP.1)[!(indicators$posGrH)],
+	"Host growth > 0", "Host growth <= 0",
+  "Carbon shared/C fixed, host growth",
+	"Sensitive symb: C shared out of C fixed", "% of simulations")
+
+# Positive host growth, tolerant symbiont carbon shared
+plotComparisonHist((sim_bleached$rhoC.2/sim_bleached$jCP.2)[indicators$posGrH],
+	(sim_bleached$rhoC.1/sim_bleached$jCP.1)[!(indicators$posGrH)],
+	"Host growth > 0", "Host growth <= 0",
+  "Carbon shared/C fixed, host growth",
+	"Tolerant symb: C shared out of C fixed", "% of simulations")
+
+# Positive host growth AND no carbon limitation, sensitive symbiont carbon shared
+plotComparisonHist((sim_bleached$rhoC.1/sim_bleached$jCP.1)[indicators$posGrH_noClimAll],
+	(sim_bleached$rhoC.1/sim_bleached$jCP.1)[!(indicators$posGrH_noClimAll)],
+	"Host growth > 0 and no C-lim", "Host growth <= 0 and/or C-lim",
+  "Carbon shared/C fixed, host growth and C-limitation",
+	"Sensitive symb: C shared out of C fixed", "% of simulations")
+
+# Positive host growth AND no carbon limitation, tolerant symbiont carbon shared
+plotComparisonHist((sim_bleached$rhoC.2/sim_bleached$jCP.2)[indicators$posGrH_noClimAll],
+	(sim_bleached$rhoC.1/sim_bleached$jCP.1)[!(indicators$posGrH_noClimAll)],
+	"Host growth > 0 and no C-lim", "Host growth <= 0 and/or C-lim",
+  "Carbon shared/C fixed, host growth and C-limitation",
+	"Tolerant symb: C shared out of C fixed", "% of simulations")
+```
+
+## Carbon shared per unit of host biomass
+
+```{r carbon-shared-total-histograms}
+par(mfrow=c(2,2))
+
+# Simulations that meet indicator compared to all simulations
+plotIndicatorHist(sim_bleached$rhoC.tot[indicators$posGrH],
+	hist(sim_bleached$rhoC.tot, plot=FALSE),
+	"Positive host growth", "Carbon shared w/ host (per C-mol host)",
+	"% of simulations")
+
+plotIndicatorHist(sim_bleached$rhoC.tot[indicators$posGrH_noClimAll],
+	hist(sim_bleached$rhoC.tot, plot=FALSE),
+	"Positive host growth, no C-lim", "Carbon shared w/ host (per C-mol host)",
+	"% of simulations")
+
+# Simulations that meet indicator vs. those that don't
+plotComparisonHist(sim_bleached$rhoC.tot[indicators$posGrH],
+	sim_bleached$rhoC.tot[!(indicators$posGrH)],
+	"Host growth > 0", "Host growth <= 0", "Positive host growth",
+  "Carbon shared w/ host (per C-mol host)", "% of simulations")
+
+plotComparisonHist(sim_bleached$rhoC.tot[indicators$posGrH_noClimAll],
+	sim_bleached$rhoC.tot[!(indicators$posGrH_noClimAll)],
+		"Host growth > 0 and no C-lim", "Host growth <= 0 and/or C-lim",
+    "Positive host growth, no C-lim",
+  "Carbon shared w/ host (per C-mol host)", "% of simulations")
+```
+
+## Minimum amount of carbon shared that defines a functional symbiosis?
+
+Minimum carbon shared per unit of host biomass
+
+* All simulations
+  `r min(sim_bleached$rhoC.tot)`
+* Simulations with positive host growth
+  `r min(sim_bleached$rhoC.tot[indicators$posGrH])`
+* Simulations with positive host growth and no carbon limitation
+  `r min(sim_bleached$rhoC.tot[indicators$posGrH_noClimAll])`
+
+Suppose we set a "cutoff" amount of carbon shared (per unit of host biomass) that determines
+a functional symbiosis. We further require that host growth be positive (obviously). How does
+this compare to our other metric of health of no carbon limitation (and positive host growth)?
+
+* Carbon shared must be >= 1% of C-mol host biomass
+    - AGREE: Both conditions (carbon shared, C-limitation) are met (% of simulations):
+      `r paste0(signif(sum(indicators$posGrH & (sim_bleached$rhoC.tot >= 0.01) & indicators$noClimAll)/nrow(indicators) * 100, 6), "%")`
+    - AGREE: Both conditions are not met (they agree the host is dead/symbiosis is dysfunctional) (% of simulations):
+      `r paste0(signif(sum(!(indicators$posGrH) | (!(sim_bleached$rhoC.tot >= 0.01) & !(indicators$noClimAll)))/nrow(indicators) * 100, 6), "%")`
+    - DISAGREE: Growth is positive & carbon is shared but C-limitation is not reached  (% of simulations):
+      `r paste0(signif(sum(indicators$posGrH & (sim_bleached$rhoC.tot >= 0.01) & !(indicators$noClimAll)) / nrow(indicators) * 100, 6), "%")`
+    - DISAGREE: Growth is positive & C-limitation is reached but not enough carbon is shared in (% of simulations):
+      `r paste0(signif(sum(indicators$posGrH & !(sim_bleached$rhoC.tot >= 0.01) & (indicators$noClimAll)) / nrow(indicators) * 100, 6), "%")`
+
+* Carbon shared must be >= 5% of C-mol host biomass
+    - AGREE: Both conditions (carbon shared, C-limitation) are met (% of simulations):
+      `r paste0(signif(sum(indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05) & indicators$noClimAll)/nrow(indicators) * 100, 6), "%")`
+    - AGREE: Both conditions are not met (they agree the host is dead/symbiosis is dysfunctional) (% of simulations):
+      `r paste0(signif(sum(!(indicators$posGrH) | (!(sim_bleached$rhoC.tot >= 0.05) & !(indicators$noClimAll)))/nrow(indicators) * 100, 6), "%")`
+    - DISAGREE: Growth is positive & carbon is shared but C-limitation is not reached  (% of simulations):
+      `r paste0(signif(sum(indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05) & !(indicators$noClimAll)) / nrow(indicators) * 100, 6), "%")`
+    - DISAGREE: Growth is positive & C-limitation is reached but not enough carbon is shared in (% of simulations):
+      `r paste0(signif(sum(indicators$posGrH & !(sim_bleached$rhoC.tot >= 0.05) & (indicators$noClimAll)) / nrow(indicators) * 100, 6), "%")`
+
+```{r cshare5-shMax-histograms}
+par(mfrow=c(2,2))
+# Compare S:H ratio for simulations with positive growth and carbon sharing with S:H ratio for all simulations
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05)],
+  comparison=hist(sim_bleached$shMax, plot=FALSE),
+  title="Compare shared C to all sims", xlab="Max S:H ratio", ylab="% simulations")
+
+plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05)],
+  comparison=hist(sim_bleached$shMax, plot=FALSE),
+  title="Zoom in: Compare shared C to all sims", xlab="Max S:H ratio", ylab="% simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 10))
+
+  # Compare S:H ratio for simulations with positive growth and carbon sharing with S:H ratio for simulations
+  # with positive growth and no carbon limitation
+  plotComparisonHist(sim_bleached$shMax[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05)],
+    sim_bleached$shMax[indicators$posGrH_noClimAll], "H. growth > 0, C shared >= 5%", "H. growth > 0, no C-lim.",
+    title="Compared shared C to no C-lim", xlab="Max S:H ratio", ylab="% simulations")
+
+plotComparisonHist(sim_bleached$shMax[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05)],
+  sim_bleached$shMax[indicators$posGrH_noClimAll], "H. growth > 0, C shared >= 5%", "H. growth > 0, no C-lim.",
+  title="Zoom in: Compared shared C to no C-lim", xlab="Max S:H ratio", ylab="% simulations",
+  xlim=c(0.3, 0.7), ylim=c(0, 3))
 ```
 
 # Selected simulations that show different indicators of health
@@ -309,20 +517,15 @@ plotIndicatorHist(data=sim_bleached$shMax[indicators$posGrH_noClimAll == 1], com
 #  - Plot of host growth rate (dH/Hdt)
 #  - Plot of symbiont/host ratio
 #  - Plot of C/N limitation
-#  - Plot of CO2/light limitation
 
 niceplots <- function(run, pars, i) {
 
   # Calculate C/N and CO2/light limitation
   cnlim <- cn_limitation(run, pars_both)
-  cllim <- light_limitation(run, pars_both)
 
   # Find the min and max values of the things we'll plot
   mincnlim <- min(unlist(lapply(cnlim, min)), 0)
   maxcnlim <- max(unlist(lapply(cnlim, max)), 0)
-
-  mincllim <- min(unlist(lapply(cllim, min)), 0)
-  maxcllim <- max(unlist(lapply(cllim, max)), 0)
 
   minSH <- min(run$S.1/run$H, run$S.2/run$H)
   maxSH <- max(run$S.1/run$H, run$S.2/run$H)
@@ -345,11 +548,6 @@ niceplots <- function(run, pars, i) {
       main=paste0("Sim ", i, ": C/N lim"), ylim=c(mincnlim, maxcnlim))
   lines(time, cnlim$S.2, col="#FFB000")
   lines(time, cnlim$H, col="black")
-
-  # Plot CO2/light limitation
-  # plot(run$time[-1], cllim$S.1[-1], type="l", col="#648FFF", xlab="time (days)", ylab="C/N limitation",
-  #     main=paste0("Sim ", i, ": Light lim"), ylim=c(mincllim, maxcllim))
-  # lines(time, cllim$S.2, col="#FFB000")
 }
 ```
 
@@ -514,6 +712,157 @@ for (i in sims) {
 
   niceplots(run, pars_both, i)
 }
+```
+
+## Host is growing and receiving >= 5% carbon/C-mol host, but host and/or symbiont(s) are carbon-limited
+
+```{r timeseries-posGrH-cshare5-noClimAll}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+sims <- seq(1:nrow(sim_bleached))[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05) & !(indicators$noClimAll)]
+sims <- sample(sims, min(12, nrow(sims)))
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+}
+```
+
+### A couple of these simulations have high max symbiont:host ratios
+
+```{r shMax-posGrH-cshare5-noClimAll}
+
+plotComparisonHist(sim_bleached$shMax[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05) & !(indicators$noClimAll)],
+  sim_bleached$shMax[indicators$posGrH_noClimAll],
+  "Carbon shared but some C-limitation", "No C-limitation", "Positive host growth and...",
+  "Maximum symbiont:host ratio", "% of simulations")
+```
+
+### The simulations with the highest max symbiont:host ratios
+The 4 highest S:H ratios
+
+```{r timeseries-highSH-posGrH-cshare5-noClimAll, cache=TRUE, dependson=c("run-sims", "summarize-indicator-mean")}
+par(mfrow=c(4, 3))
+
+time <- seq(0, 150, 0.1)
+
+shValues <- sim_bleached[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05) & !(indicators$noClimAll), "shMax"]
+shToPlot <- sort(shValues, decreasing=TRUE)[[min(nrow(shValues), 4)]]
+sims <- seq(1:nrow(sim_bleached))[indicators$posGrH & (sim_bleached$rhoC.tot >= 0.05) & !(indicators$noClimAll) & sim_bleached$shMax >= shToPlot]
+sims <- sort(sims)
+
+for (i in sims) {
+  Li <- sim_bleached[i, "L"]
+  Ni <- sim_bleached[i, "N"]
+  Xi <- sim_bleached[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+  run <- run_coral(time=time, env=env, pars=pars_both)
+
+  niceplots(run, pars_both, i)
+}
+
+
+```
+
+# Check that carbon sharing is a "good" indicator of a functioning symbiosis in the 1-symbiont case
+
+```{r run-sims-1symb, cache=TRUE, dependson=c("set-bleached-pars", "run-sims")}
+## Run the simulations and record various possible indicators of a healthy host ##
+
+# run simulations for 100 days to determine survival
+time <-seq(0, 100, 0.1)
+
+# Use the same environmental parameters (env_params) as drawn previously in the run-sims code chunk
+
+# set up for parallel run
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  # Run the simulation
+  run_sen <- run_coral_initFluxes(time=time, env=env, pars=pars_sen, initjHG=initjHG, initjCP=initjCP_single)
+  run_tol <- run_coral_initFluxes(time=time, env=env, pars=pars_tol, initjHG=initjHG, initjCP=initjCP_single)
+
+  # Calculate C-N limitation
+  cnlim_sen <- cn_limitation(run_sen, pars_sen)
+  cnlim_tol <- cn_limitation(run_tol, pars_tol)
+
+  # Possible measures of recovery from bleaching and return to functional symbiosis:
+  #host growth, lack of carbon limitation, symbiont carbon sharing
+  posGrH.sen <- (run_sen$dH.Hdt[length(time)] > 0) # Is host growth positive?
+  posGrH.tol <- (run_tol$dH.Hdt[length(time)] > 0)
+  noClimAll.sen <- (cnlim_sen$H[length(time)] >= 0) & (cnlim_sen$S[length(time)] >= 0)# Are host and symb. NOT carbon-limited?
+  noClimAll.tol <- (cnlim_tol$H[length(time)] >= 0) & (cnlim_tol$S[length(time)] >= 0)
+  rhoC.tot.sen <- run_sen$rhoC[length(time)] * run_sen$S[length(time)] / run_sen$H[length(time)] # Carbon shared per unit host
+  rhoC.tot.tol <- run_tol$rhoC[length(time)] * run_tol$S[length(time)] / run_tol$H[length(time)]
+
+  # Other useful summary statistics
+  shMax.sen <- max(run_sen$S / run_sen$H) # Maximum symbiont:host ratio
+  shMax.tol <- max(run_tol$S / run_tol$H)
+
+  # Return the environmental parameters & possible measures of recovery from bleaching
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH.sen"=posGrH.sen, "posGrH.tol"=posGrH.tol, "noClimAll.sen"=noClimAll.sen,
+    "noClimAll.tol"=noClimAll.tol, "rhoC.tot.sen"=rhoC.tot.sen, "rhoC.tot.tol"=rhoC.tot.tol,
+    "shMax.sen"=shMax.sen, "shMax.tol"=shMax.tol)
+}
+
+stopCluster(cl) # stop the cluster
+
+# Store results in dataframe, as type numeric
+sim_bleached_1symb <- data.frame(results, row.names=NULL)
+sim_bleached_1symb <- transform(sim_bleached_1symb, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH.sen=as.logical(posGrH.sen), posGrH.tol=as.logical(posGrH.tol),
+  noClimAll.sen=as.logical(noClimAll.sen), noClimAll.tol=as.logical(noClimAll.tol),
+  rhoC.tot.sen=as.numeric(rhoC.tot.sen), rhoC.tot.tol=as.numeric(rhoC.tot.tol),
+  shMax.sen=as.numeric(shMax.sen), shMax.tol=as.numeric(shMax.tol))
+```
+
+```{r}
+par(mfrow=c(2,2))
+
+# Histograms of S:H ratio, all vs. posGrH & rhoC.tot >= 0.05
+plotIndicatorHist(sim_bleached_1symb$shMax.sen[sim_bleached_1symb$posGrH.sen & (sim_bleached_1symb$rhoC.tot.sen >= 0.05)],
+  hist(sim_bleached_1symb$shMax.sen, plot=FALSE), "S. symb: H growth > 0, shared C >= 5%", "Max. S:H ratio", "% simulations")
+
+  plotIndicatorHist(sim_bleached_1symb$shMax.tol[sim_bleached_1symb$posGrH.tol & (sim_bleached_1symb$rhoC.tot.tol >= 0.05)],
+    hist(sim_bleached_1symb$shMax.tol, plot=FALSE), "T. symb: H growth > 0, shared C >= 5%", "Max. S:H ratio", "% simulations")
+
+# Histograms of S:H ratio, all vs. posGrH & noClimAll
+plotIndicatorHist(sim_bleached_1symb$shMax.sen[sim_bleached_1symb$posGrH.sen & sim_bleached_1symb$noClimAll.sen],
+  hist(sim_bleached_1symb$shMax.sen, plot=FALSE), "S. symb: H growth > 0, no C-lim.", "Max. S:H ratio", "% simulations")
+
+plotIndicatorHist(sim_bleached_1symb$shMax.tol[sim_bleached_1symb$posGrH.tol & sim_bleached_1symb$noClimAll.tol],
+  hist(sim_bleached_1symb$shMax.tol, plot=FALSE), "T. symb: H growth > 0, no C-lim.", "Max. S:H ratio", "% simulations")
+
+par(mfrow=c(2, 1))
+
+# Histograms of posGrH & noClimAll vs rhoC.tot
+plotComparisonHist(sim_bleached_1symb$shMax.sen[sim_bleached_1symb$posGrH.sen & (sim_bleached_1symb$rhoC.tot.sen >= 0.05)],
+  sim_bleached_1symb$shMax.sen[sim_bleached_1symb$posGrH.sen & sim_bleached_1symb$noClimAll.sen],
+  "H growth > 0, shared C >= 5%", "H growth > 0, no C-lim.", "S. symb: shared carbon and carbon limitation",
+  "Max. S:H ratio", "% simulations")
+
+plotComparisonHist(sim_bleached_1symb$shMax.tol[sim_bleached_1symb$posGrH.tol & (sim_bleached_1symb$rhoC.tot.tol >= 0.05)],
+  sim_bleached_1symb$shMax.tol[sim_bleached_1symb$posGrH.tol & sim_bleached_1symb$noClimAll.tol],
+  "H growth > 0, shared C >= 5%", "H growth > 0, no C-lim.", "T. symb: shared carbon and carbon limitation",
+  "Max. S:H ratio", "% simulations", xlim=c(0, 0.3))
 ```
 
 # Next steps
