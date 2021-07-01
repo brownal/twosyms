@@ -38,6 +38,11 @@ as well as combinations of these measures:
 * Host is not carbon-limited at day 100 post-bleaching
 * Symbiont is not carbon-limited at day 100 post-bleaching
 
+We also investigated two additional measures of a functional symbiosis (see finding 5 below)
+
+* The carbon the symbiont shares with the host, in comparison to the symbiont's photosynthetic rate
+* The carbon the symbiont shares with the host, in comparison to the host's biomass
+
 We want to know:
 
 1. Do these measures often detect cases with high overshoot (symbiont:host ratio is very high)?
@@ -52,8 +57,9 @@ We found:
     + Even with all the indicators combined, we're still seeing cases with S:H ratio around 0.4
     + I personally think this might be okay
 2. Recovery process (time series)
-    + Ask Ross; nothing looks terrible to me of the indicators I checked
-    + I checked positive growth, positive growth + host and/or symbiont not C-limited
+    + Many simulations for each indicator look "well-behaved"
+    + Simulations specifically selected to meet one recovery criterion but not the others tend to include
+      more examples of potentially unrealistic or strange behavior
 3. Particularly helpful/redundant indicators
     + Host not carbon-limited on day 100 captures a range of S:H ratios that's neither too small
       (possibly actually bleached) or too large (possible unrealistic overshoot)
@@ -64,6 +70,36 @@ We found:
         - Similarly, their symbionts are also generally not carbon-limited (95% of the time)
     + Symbionts are frequently not carbon-limited
         - Possibly symbionts not being carbon-limited is conceptually important, though
+    + Positive growth and no carbon limitation (for both hosts and symbionts) may be the best indicator
+        - It filters out simulations with low symbiont:host ratios, which are probably bleached hosts
+        - It filters out simulations with very high symbiont:host ratios, which are probably dysfunctional symbioses
+        - Simulations that meet all but one of these conditions include examples with less "well-behaved" trajectories
+          (potentially these are dysfunctional symbioses)
+4. Using carbon limitation as a measure of host health/functional symbiosis may be problematic
+    + We hope to explain simulation behavior using carbon limitation, and selecting only simulations
+      that meet a certain C-limitation criterion makes this difficult
+    + It's not clear that a lack of carbon limitation is actually the best indicator of a functional symbiosis
+    + Ross suggested that carbon sharing (rhoC), possibly in comparison to photosynthesis (jCP) might be a better measure
+5. Carbon sharing as a measure of a functional symbiosis
+    + Both measures of carbon sharing carbon shared per carbon fixed by photosynthesis and carbon shared per C-mol host
+      appear to have threshold values that can be used to divide simulations into 2 cases: alive & no C-limitation vs
+      either dead or alive with C-limitation
+    + I don't have a biological justification for either threshold value
+    + Carbon shared per unit host biomass seemed conceptually more likely to define a functional symbiosis from the host's
+      perspective, so I investigated that further
+6. Carbon shared per unit host biomass
+    + Simulations where the total carbon shared by symbionts was >= 5% and host growth was positive almost always
+      had no carbon limitation
+    + Simulations that did not meet the above criterion had negative host growth and/or carbon limitation nearly always
+    + Simulations that met this criterion (carbon shared + positive growth) also tend to have moderate (neither bleached
+      nor extremely high) symbiont:host ratios
+    + This is true whether we look at hosts with sensitive and tolerant symbionts, or hosts with only one of these symbionts
+    + I think this could be a pretty good measure of a functional symbiosis
+7. Interesting or annoying news: tolerant symbiont:host ratios in host recovering from bleaching tend to be moderate (< 0.3),
+   while sensitive symbiont:host ratios can be higher even in positively growing hosts in a functional symbiosis
+    + Does this just mean tolerant symbionts are "better-behaved" in this model?
+    + Or is it a worrying sign that our tolerant symbiont is not parameterized properly (we would expect higher symbiont:host ratios)
+    + Or possibly this is just a sign of longer transients for tolerant symbionts?
 
 # Simulate bleached hosts
 
