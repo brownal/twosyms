@@ -23,10 +23,6 @@ library("plot3D")
 library("adegenet")
 library("knitr")
 
-source("run_coral_rhoN.R")
-source("run_coral_oc_rhoN.R")
-source("synth.R")
-
 options(repr.plot.res=240)
 ```
 
@@ -37,10 +33,9 @@ The goal is to find out
 1. When both symbionts are present, which one dominates the host?
 2. How does the presence of dissolved organic carbon affect this?
 
+```{r set-unbleached-pars, cache=TRUE}
+### Set the parameters for the simulations
 
-### Set symbiont parameters
-
-```{r}
 # parameters for single-symbiont simulations
 # sensitive symb. parameters
 pars_sen <- def_pars(nsym=1)
@@ -67,7 +62,7 @@ pars_both$initS[1:2] <- c(0.5, 0.5)
 
 #### Actually run the simulations
 
-```{r no-doc-sims, cache=TRUE}
+```{r no-doc-sims, cache=TRUE, dependson=c("set-unbleached-pars")}
 
 # run simulations for 600 days
 time<-seq(0, 600, 0.1)
@@ -94,13 +89,13 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
     # Simulations!
     # simulate dynamics with just the sensitive symbiont
-    run_sen <- run_coral_rhoN(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+    run_sen <- coRal::run_coral(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
 
     # simulate dynamics with just the tolerant symbiont
-    run_tol <- run_coral_rhoN(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
+    run_tol <- coRal::run_coral(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
 
     # simulate dynamics with both symbionts
-    run_both <- run_coral_rhoN(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+    run_both <- coRal::run_coral(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
 
     # Process simulations to get summary statistics
@@ -156,10 +151,10 @@ stopCluster(cl) # stop the cluster
 no_doc_sims <- data.frame(results, row.names=NULL)
 ```
 
-#### Set the columns of the summary dataframe to their proper types (numerical/factor)
 
-```{r no-doc-column-types}
-# set the columns to their proper types
+
+```{r process-no-doc-sims, cache=TRUE, dependson=c("no-doc-sims")}
+#### Set the columns of the summary dataframe to their proper types (numerical/factor) ####
 no_doc_sims <- transform(no_doc_sims,
       L=as.numeric(L), N=as.numeric(N), X=as.numeric(X), kCO2=as.numeric(kCO2),
       converge_sen=as.logical(converge_sen), converge_tol=as.logical(converge_tol), converge_both=as.logical(converge_both),
@@ -167,13 +162,9 @@ no_doc_sims <- transform(no_doc_sims,
       tol_per_sen=as.numeric(tol_per_sen),
       sh_ratio_sen=as.numeric(sh_ratio_sen), sh_ratio_tol=as.numeric(sh_ratio_tol), sh_ratio_both=as.numeric(sh_ratio_both),
       host_growth_sen=as.numeric(host_growth_sen), host_growth_tol=as.numeric(host_growth_tol), host_growth_both=as.numeric(host_growth_both))
-```
 
 
-#### Find the dominant symbiont when both symbionts are present
-
-```{r no-doc-dominant-symb}
-
+#### Find the dominant symbiont when both symbionts are present ####
 dominant_symb <- rep(NA, times=nrow(no_doc_sims))
 
 for (i in 1:nrow(no_doc_sims)) {
@@ -197,15 +188,10 @@ for (i in 1:nrow(no_doc_sims)) {
       }
 }
 
-
 no_doc_sims$dominant_symb <- factor(dominant_symb, levels=c("Sensitive", "No_survival", "Tolerant", "Co-dominant"))
-```
 
 
-#### Find where hosts are able to survive with only one symbiont
-
-```{r no-doc-1-symb-survival}
-
+#### Find where hosts are able to survive with only one symbiont ####
 survival_1symb <- rep(NA, times=nrow(no_doc_sims))
 
 for (i in 1:nrow(no_doc_sims)) {
@@ -256,13 +242,13 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
     # Simulations!
     # simulate dynamics with just the sensitive symbiont
-    run_sen <- run_coral_rhoN(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+    run_sen <- coRal::run_coral(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
 
     # simulate dynamics with just the tolerant symbiont
-    run_tol <- run_coral_rhoN(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
+    run_tol <- coRal::run_coral(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
 
     # simulate dynamics with both symbionts
-    run_both <- run_coral_rhoN(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+    run_both <- coRal::run_coral(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
 
     # Process simulations to get summary statistics
@@ -392,13 +378,13 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
     # Simulations!
     # simulate dynamics with just the sensitive symbiont
-    run_sen <- run_coral_oc_rhoN(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+    run_sen <- coRal::run_coral_oc(time=time, env=env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
 
     # simulate dynamics with just the tolerant symbiont
-    run_tol <- run_coral_oc_rhoN(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
+    run_tol <- coRal::run_coral_oc(time=time, env=env, pars=replace(pars_tol, "kCO2", search_params[i, "kCO2"]))
 
     # simulate dynamics with both symbionts
-    run_both <- run_coral_oc_rhoN(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+    run_both <- coRal::run_coral_oc(time=time, env=env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
 
     # Process simulations to get summary statistics
@@ -585,55 +571,159 @@ Colored by dominant symbiont
 
 ```{r}
 
+# A function for plotting histograms colored by outcomes
+# data should be a list of the form (data1=data to plot 1st, data2=data to plot 2nd, ...)
+plotStackedHist <- function(data, colors=NULL, legend=NULL, legendLocation=NULL, plotLegend=FALSE, breaks="Sturges", ...) {
+  plotargs <- list(...)
+
+  # Assign colors as shades of gray if no colors are given
+  if (is.null(colors)) {
+    colors <- lapply(seq(0, 0.9, length.out=length(data)), function(x) {rgb(x, x, x)})
+  }
+
+  # Create but don't plot a histogram of all the data
+  # This will be used get the breaks for the histograms we "stack" and to normalize their heights
+  histAll <- hist(unlist(data), breaks=breaks, plot=FALSE)
+  breaks <- histAll$breaks # get the breaks to use for the other histograms
+  normalizeBy <- sum(histAll$counts) # Get the total number of simulations to normalize by
+
+  # Plot the data as a stacked histogram.
+  # We go through the data backwards, first plotting a histogram of everything, then
+  # removing one dataset at a time and adding new histogram on top the other histograms
+  # This creates a "stacked" effect, with the first dataset at the bottom of the stack
+  histAll$density <- histAll$counts / normalizeBy * 100
+  do.call(plot, c(list(histAll, freq=FALSE, col=colors[[length(data)]]), plotargs))
+
+  for (i in (length(data)-1):1) {
+    histi <- hist(unlist(data[1:i]), breaks=breaks, plot=FALSE)
+    histi$density <- histi$counts / normalizeBy * 100
+    plot(histi, freq=FALSE, add=TRUE, col=colors[[i]])
+  }
+
+  # Add a legend
+  if (plotLegend) {
+    if (is.null(legend)) {
+      legend <- lapply(seq(1, length(data)), function(x) {paste0("data ", x)})
+    }
+
+    if (is.null(legendLocation)) {
+      legendLocation <- "topright"
+    }
+
+    legend(legendLocation, legend, pt.bg=colors, col="black", pch=22)
+  }
+}
+```
+
+
+```{r}
+
 par(mfrow=c(2,2))
 
-### Light
+datalda <- no_doc_sims[, c("dominant_symb", "L", "N", "X")]
+datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
 
-mybreaks <- seq(5, 60, 2.5) #Otherwise it auto-includes values between 4 and 5, which we didn't simulate
+mylda <- lda(dominant_symb ~ L + N + X, datalda)
+ptslda <- predict(mylda, datalda[, c("L", "N", "X")])
 
-hist(no_doc_sims$L, col="black", breaks=mybreaks,
-	xlab="Light (mol photons/m^2/day)", ylab="# Simulations",
-	main="Light")
+pdf("dominant_symb.pdf", 10, 5)
+layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
 
-hist(no_doc_sims$L[(no_doc_sims$dominant_symb=="Sensitive") |
-	(no_doc_sims$dominant_symb=="Tolerant")],
-	breaks=mybreaks, add=TRUE, col="#FFB000")
+plot(predict(mylda)$x[,1], predict(mylda)$x[,2], col=c("#648FFF40", rgb(0, 0, 0, 0.25), "#FFB00040")[no_doc_sims$dominant_symb],
+	pch=c(1, 0, 19)[no_doc_sims$dominant_symb], xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
 
-hist(no_doc_sims$L[no_doc_sims$dominant_symb=="Sensitive"],
-	breaks=mybreaks, add=TRUE, col="#648FFF")
+arrows(x0=0, y0=0, x1=1.5*mylda$scaling[1,1], y1=1.5*mylda$scaling[1,2], length=0.1, col="white")
+text(x=1.25*mylda$scaling[1,1], y=1.25*mylda$scaling[1,2], labels="Light", pos=3, col="white")
 
-### Nitrogen
+arrows(x0=0, y0=0, x1=1.5*mylda$scaling[2,1], y1=1.5*mylda$scaling[2,2], length=0.1, col="black")
+text(x=1.25*mylda$scaling[2,1], y=1.25*mylda$scaling[2,2], labels="Nitrogen", pos=2, col="black")
 
-mybreaks <- hist(no_doc_sims$N, plot=FALSE)$breaks
-
-hist(no_doc_sims$N, col="black", breaks=mybreaks,
-	xlab="Nitrogen (mol/L)", ylab="# Simulations",
-	main="Nitrogen")
-
-hist(no_doc_sims$N[(no_doc_sims$dominant_symb=="Sensitive") |
-	(no_doc_sims$dominant_symb=="Tolerant")],
-	breaks=mybreaks, add=TRUE, col="#FFB000")
-
-hist(no_doc_sims$N[no_doc_sims$dominant_symb=="Sensitive"],
-	breaks=mybreaks, add=TRUE, col="#648FFF")
+arrows(x0=0, y0=0, x1=1.5*mylda$scaling[3,1], y1=1.5*mylda$scaling[3,2], length=0.1, col="black")
+text(x=1.25*mylda$scaling[3,1], y=1.25*mylda$scaling[3,2], labels="Food", pos=2, col="black")
 
 
+plotStackedHist(data=list(no_doc_sims$L[(no_doc_sims$dominant_symb == "Sensitive")],
+  no_doc_sims$L[(no_doc_sims$dominant_symb == "Tolerant")],
+  no_doc_sims$L[(no_doc_sims$dominant_symb == "No_survival")]),
+  breaks=seq(5, 60, 2.5),
+  colors=c("#648FFF", "#FFB000", "black"),
+  xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light", xlim=c(5, 60))
 
 
-### Food
+plotStackedHist(data=list(no_doc_sims$N[(no_doc_sims$dominant_symb == "Sensitive")],
+  no_doc_sims$N[(no_doc_sims$dominant_symb == "Tolerant")],
+  no_doc_sims$N[(no_doc_sims$dominant_symb == "No_survival")]),
+  colors=c("#648FFF", "#FFB000", "black"),
+  xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
-mybreaks <- hist(no_doc_sims$X, plot=FALSE)$breaks
+plotStackedHist(data=list(no_doc_sims$X[(no_doc_sims$dominant_symb == "Sensitive")],
+  no_doc_sims$X[(no_doc_sims$dominant_symb == "Tolerant")],
+  no_doc_sims$X[(no_doc_sims$dominant_symb == "No_survival")]),
+  colors=c("#648FFF", "#FFB000", "black"),
+  xlab="Food (mol/L)", ylab="% Simulations", main="(d) Food")
 
-hist(no_doc_sims$X, col="black", breaks=mybreaks,
-	xlab="Food (mol/L)", ylab="# Simulations",
-	main="Food")
 
-hist(no_doc_sims$X[(no_doc_sims$dominant_symb=="Sensitive") |
-	(no_doc_sims$dominant_symb=="Tolerant")],
-	breaks=mybreaks, add=TRUE, col="#FFB000")
+### Legend
+plot.new()
+legend("center", c("Sensitive symb.", "Tolerant symb.", "No survival"),
+	col=c("#648FFF", "#FFB000", "black"), pch=c(1, 19, 0),
+	title="Legend: Dominant symb.", cex=1.3, pt.cex=1.5)
 
-hist(no_doc_sims$X[no_doc_sims$dominant_symb=="Sensitive"],
-	breaks=mybreaks, add=TRUE, col="#648FFF")
+dev.off()
+
+
+#predict(mylda, data.frame(L=c(1, 0, 0), N=c(0, 1, 0), X=c(0, 0, 1)))
+
+
+# allLight <- hist(no_doc_sims$L, breaks=mybreaks, plot=FALSE)
+# allLight$counts <- allLight$counts / sum(allLight$counts) * 100 # convert bar heights to %
+#
+# plot(allLight, freq=FALSE, col="black",
+# 	xlab="Light (mol photons/m^2/day)", ylab="# Simulations",
+# 	main="Light")
+#
+#
+# hist(no_doc_sims$L[(no_doc_sims$dominant_symb=="Sensitive") |
+# 	(no_doc_sims$dominant_symb=="Tolerant")],
+# 	breaks=mybreaks, add=TRUE, col="#FFB000")
+#
+# hist(no_doc_sims$L[no_doc_sims$dominant_symb=="Sensitive"],
+# 	breaks=mybreaks, add=TRUE, col="#648FFF")
+#
+# ### Nitrogen
+#
+# mybreaks <- hist(no_doc_sims$N, plot=FALSE)$breaks
+#
+# hist(no_doc_sims$N, col="black", breaks=mybreaks,
+# 	xlab="Nitrogen (mol/L)", ylab="# Simulations",
+# 	main="Nitrogen")
+#
+# hist(no_doc_sims$N[(no_doc_sims$dominant_symb=="Sensitive") |
+# 	(no_doc_sims$dominant_symb=="Tolerant")],
+# 	breaks=mybreaks, add=TRUE, col="#FFB000")
+#
+# hist(no_doc_sims$N[no_doc_sims$dominant_symb=="Sensitive"],
+# 	breaks=mybreaks, add=TRUE, col="#648FFF")
+#
+#
+#
+#
+# ### Food
+#
+# mybreaks <- hist(no_doc_sims$X, plot=FALSE)$breaks
+#
+# hist(no_doc_sims$X, col="black", breaks=mybreaks,
+# 	xlab="Food (mol/L)", ylab="# Simulations",
+# 	main="Food")
+#
+# hist(no_doc_sims$X[(no_doc_sims$dominant_symb=="Sensitive") |
+# 	(no_doc_sims$dominant_symb=="Tolerant")],
+# 	breaks=mybreaks, add=TRUE, col="#FFB000")
+#
+# hist(no_doc_sims$X[no_doc_sims$dominant_symb=="Sensitive"],
+# 	breaks=mybreaks, add=TRUE, col="#648FFF")
 
 ### Legend
 plot.new()
@@ -785,7 +875,7 @@ summary(mydapc)
 
 ### Plot of the dominant symbiont when 2 symbionts are present
 
-```{r}
+```{r dominant-symb, dev=c("png", "pdf")}
 #png("doc_dapc_healthy.png")
 plot(mydapc$ind.coord[,"LD1"], mydapc$ind.coord[,"LD2"], col=c("#648FFF", rgb(0, 0, 0), "#FFB000")[mydapc$grp], pch=c(1, 0, 19, 15)[mydapc$grp],
   xlab="DAPC axis 1", ylab="DAPC axis 2")
@@ -815,7 +905,7 @@ bg="white")
 ### Plot of the distribution of the simulated environmental variables
 Colored by dominant symbiont
 
-```{r}
+```{r dominant-symb-histograms, dev=c("png", "pdf")}
 
 par(mfrow=c(2,2))
 
@@ -825,7 +915,7 @@ mybreaks <- seq(5, 60, 2.5) #Otherwise it auto-includes values between 4 and 5, 
 
 hist(doc_sims$L, col="black", breaks=mybreaks,
 	xlab="Light (mol photons/m^2/day)", ylab="# Simulations",
-	main="Light")
+	main="(b) Light")
 
 hist(doc_sims$L[(doc_sims$dominant_symb=="Sensitive") |
 	(doc_sims$dominant_symb=="Tolerant")],
@@ -840,7 +930,7 @@ mybreaks <- hist(doc_sims$N, plot=FALSE)$breaks
 
 hist(doc_sims$N, col="black", breaks=mybreaks,
 	xlab="Nitrogen (mol/L)", ylab="# Simulations",
-	main="Nitrogen")
+	main="(c) Nitrogen")
 
 hist(doc_sims$N[(doc_sims$dominant_symb=="Sensitive") |
 	(doc_sims$dominant_symb=="Tolerant")],
@@ -858,7 +948,7 @@ mybreaks <- hist(doc_sims$X, plot=FALSE)$breaks
 
 hist(doc_sims$X, col="black", breaks=mybreaks,
 	xlab="Food (mol/L)", ylab="# Simulations",
-	main="Food")
+	main="(d) Food")
 
 hist(doc_sims$X[(doc_sims$dominant_symb=="Sensitive") |
 	(doc_sims$dominant_symb=="Tolerant")],
@@ -947,7 +1037,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
                            N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
 
     # Check if the sensitive symbiont can survive alone
-    run_1symb <- run_coral_rhoN(time=survival_time, env=survival_env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+    run_1symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
 
     # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
@@ -957,7 +1047,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
     # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
 
-        run_2symb <- run_coral_rhoN(time=survival_time, env=survival_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+        run_2symb <- coRal::run_coral(time=survival_time, env=survival_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
         # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
         # set reason to "No_survival"
@@ -970,7 +1060,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
              # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
              # To figure out if this happened, we need to actually run things to equilibrium
-             run_2symb_equil <- run_coral_rhoN(time=equil_time, env=equil_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+             run_2symb_equil <- coRal::run_coral(time=equil_time, env=equil_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
 
              # Check that the host and symbiont growth rates have equilibrated
@@ -1068,7 +1158,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
                            N=c(search_params[i, "N"], search_params[i, "N"], 0), X=c(search_params[i, "X"], search_params[i, "X"], 0))
 
     # Check if the sensitive symbiont can survive alone
-    run_1symb <- run_coral_oc_rhoN(time=survival_time, env=survival_env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
+    run_1symb <- coRal::run_coral_oc(time=survival_time, env=survival_env, pars=replace(pars_sen, "kCO2", search_params[i, "kCO2"]))
 
     # if the coral can achieve positive growth with just the sensitive symbiont, the sensitive symbiont doesn't need to be rescued
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] > 0) {
@@ -1078,7 +1168,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
     # only investigate the two-symbiont case if host growth is negative or 0 at the end of the simulation
     if (run_1symb$dH.Hdt[length(run_1symb$dH.Hdt)] <= 0) {
 
-        run_2symb <- run_coral_oc_rhoN(time=survival_time, env=survival_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+        run_2symb <- coRal::run_coral_oc(time=survival_time, env=survival_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
         # if the coral didn't achieve positive growth with both symbionts, then rescue definitely didn't happen
         # set reason to "No_survival"
@@ -1091,7 +1181,7 @@ results <- foreach(i=1:nrow(search_params), .combine='rbind', .packages='dplyr')
 
              # the sensitive symbiont (S1) has been rescued if it now has higher biomass than the tolerant symbiont (S2) at equilibrium
              # To figure out if this happened, we need to actually run things to equilibrium
-             run_2symb_equil <- run_coral_oc_rhoN(time=equil_time, env=equil_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
+             run_2symb_equil <- coRal::run_coral_oc(time=equil_time, env=equil_env, pars=replace(pars_both, "kCO2", search_params[i, "kCO2"]))
 
              # Check that the host and symbiont growth rates have equilibrated
              tend <- length(equil_time)
@@ -1169,7 +1259,7 @@ mydapc$pca.loadings
 summary(mydapc)
 ```
 
-```{r}
+```{r bleaching-recovery-dapc, dev=c("png", "pdf")}
 #png("no_doc_dapc_bleached.png")
 plot(mydapc$ind.coord[,"LD1"], mydapc$ind.coord[,"LD2"], col=c("#648FFF0E", rgb(0, 0, 0, 0.025), "#FFB000", "#DC267F")[mydapc$grp], pch=c(1, 0, 19, 15)[mydapc$grp],
   xlab="DAPC axis 1", ylab="DAPC axis 2")
@@ -1222,7 +1312,7 @@ bg="white")
 ### Plot of the distribution of the simulated environmental variables
 Colored by post-bleaching outcome
 
-```{r}
+```{r bleaching-recovery-histograms, dev=c("png", "pdf")}
 
 par(mfrow=c(2,2))
 
@@ -1232,7 +1322,7 @@ mybreaks <- seq(5, 60, 2.5) #Otherwise it auto-includes values between 4 and 5, 
 
 hist(no_doc_bleached_sims$L, col="#DC267F", breaks=mybreaks,
 	xlab="Light (mol photons/m^2/day)", ylab="# Simulations",
-	main="Light")
+	main="(b) Light")
 
 hist(no_doc_bleached_sims$L[(no_doc_bleached_sims$reason=="Sensitive_alone") |
 	(no_doc_bleached_sims$reason=="Tolerant_dominates") | (no_doc_bleached_sims$reason=="No_survival")],
@@ -1251,7 +1341,7 @@ mybreaks <- hist(no_doc_bleached_sims$N, plot=FALSE)$breaks
 
 hist(no_doc_bleached_sims$N, col="#DC267F", breaks=mybreaks,
 	xlab="Light (mol photons/m^2/day)", ylab="# Simulations",
-	main="Light")
+	main="(c) Nitrogen")
 
 hist(no_doc_bleached_sims$N[(no_doc_bleached_sims$reason=="Sensitive_alone") |
 	(no_doc_bleached_sims$reason=="Tolerant_dominates") | (no_doc_bleached_sims$reason=="No_survival")],
@@ -1271,7 +1361,7 @@ mybreaks <- hist(no_doc_bleached_sims$X, plot=FALSE)$breaks
 
 hist(no_doc_bleached_sims$X, col="#DC267F", breaks=mybreaks,
 	xlab="Light (mol photons/m^2/day)", ylab="# Simulations",
-	main="Light")
+	main="(d) Food")
 
 hist(no_doc_bleached_sims$X[(no_doc_bleached_sims$reason=="Sensitive_alone") |
 	(no_doc_bleached_sims$reason=="Tolerant_dominates") | (no_doc_bleached_sims$reason=="No_survival")],
@@ -1510,7 +1600,7 @@ for (i in 1:min(30, nrow(rescue_sims))) {
 
   env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
 
-  run <- run_coral_oc_rhoN(time=time, env=env, pars=pars_both)
+  run <- coRal::run_coral_oc(time=time, env=env, pars=pars_both)
 
   cnlim <- cn_limitation(run, pars_both)
 
@@ -1568,7 +1658,7 @@ for(i in 1:nrow(rescue_sims)) {
 
   env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
 
-  run <- run_coral_oc_rhoN(time=time, env=env, pars=pars_both)
+  run <- coRal::run_coral_oc(time=time, env=env, pars=pars_both)
 
   cnlim <- cn_limitation(run, pars_both)
 
@@ -1637,7 +1727,7 @@ for (i in 1:nrow(cnlim_sims)) {
 
   env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
 
-  run <- run_coral_oc_rhoN(time=time, env=env, pars=pars_both)
+  run <- coRal::run_coral_oc(time=time, env=env, pars=pars_both)
 
   cnlim <- cn_limitation(run, pars_both)
 
