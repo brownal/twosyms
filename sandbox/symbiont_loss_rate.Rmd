@@ -1,0 +1,785 @@
+---
+title: "How long does it take the non-dominant symbiont to decay?"
+author: "Alexandra Brown and Ross Cunning"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r set-options}
+# Set kintr options
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+# Load packages
+library("coRal")
+library("foreach")
+library("parallel")
+library("doParallel")
+library("MASS")
+library("knitr")
+
+# Plot size for running this in-line
+options(repr.plot.res=240)
+
+# Load functions
+source("synth.R") # synthesizing unit (used in run_coral_decay)
+source("cn_limitation.R") # calculates carbon/nitrogen limitation of host and symbiont growth SUs
+source("run_coral_symbiont_decay.R") # run_coral that stops when symbiont 2 has decayed to a certain fraction of symbiont 1
+source("plotting_functions.R") # some custom plotting functions
+
+# Define colors
+colSen <- "#648FFF"
+colTol <- "#FFB000"
+colNS <- "#000000"
+colEither <- "#00FABE"
+colRescue <- "#DC267F"
+
+# Define plotting symbols
+pchSen <- 1
+pchTol <- 19
+pchNS <- 0
+pchEither <- 3
+pchRescue <- 15
+```
+
+# Abstract
+
+We want to know:
+
+1. When sensitive and tolerant symbionts are both present in the host, which is more common (the "dominant" symbiont)?
+2. How long the host can sustain the non-dominant symbiont at appreciable levels?
+
+We found:
+
+1. Light is the major factor that affects the dominant symbiont. High light favors tolerant symbionts.
+2. Food and nitrogen determine host survival at high light but have little effect on which symbiont dominates.
+3. The non-dominant symbiont is lost more slowly when light is intermediate.
+4. The amount of non-dominant symbiont present affects the rate of its loss (i.e. log(tolerant/sensitive) vs time is not linear).
+
+
+# Simulate bleached hosts
+
+```{r set-pars, cache=TRUE}
+#### Set parameters ####
+
+# Parameters for determining dominant symbiont. Initialize the symbionts as a
+# 50-50 mix. Here sensitive symbiont is symbiont 1; tolerant is symbiont 2
+pars_dominance <- def_pars(nsym=2)
+pars_dominance$jCPm[2] <- 1.0
+pars_dominance$kROS[2] <- 250
+pars_dominance$jSGm[2] <- 0.15
+pars_dominance$initS[1:2] <- c(0.5, 0.5)
+
+
+# To determine how quickly the tolerant symbiont is lost, we set
+# the sensitive symbiont to symbiont 1 and the tolerant to symbiont 2 and
+# initialize the tolerant symbiont at 99% of the total symbionts
+pars_tol_loss <- def_pars(nsym=2)
+pars_tol_loss$jCPm[2] <- 1.0
+pars_tol_loss$kROS[2] <- 250
+pars_tol_loss$jSGm[2] <- 0.15
+pars_tol_loss$initS[1:2] <- c(0.01, 0.99)
+
+# To determine how quickly the sensitive symbiont is lost, we set
+# the tolerant symbiont to symbiont 1 and initialize the sensitive symbiont
+# at 99% of the total symbionts
+pars_sen_loss <- def_pars(nsym=2)
+pars_sen_loss$jCPm[1] <- 1.0
+pars_sen_loss$kROS[1] <- 250
+pars_sen_loss$jSGm[1] <- 0.15
+pars_sen_loss$initS[1:2] <- c(0.01, 0.99)
+
+# Randomly draw the environmental parameters
+env_params <- data.frame("L"=runif(10000, 5, 60), # Light, choose values between 5 and 60
+                            "N"=runif(10000, 1e-8, 1e-5), # DIN, choose values between 1e-8 and 1e-5
+                            "X" = runif(10000, 0, 4e-7)) # Food, choose values between 0 and 4e-7
+
+# Parameters for symbiont loss simulations
+threshold <- 0.01/0.99 # Calculate how long it takes for the symbiont to decay to 1% of the total symbionts
+max_time <- 365*2 # Give up if threshold has not been reached after 2 years
+dt <- 0.1 # Simulate taking time steps of 0.1 day
+```
+
+
+```{r run-dominance-sims, cache=TRUE, dependson=c("set-pars")}
+#### Determine which symbiont dominates the host under various environmental conditions ####
+
+# Run simulations for 10 years
+time<-seq(0, 10*365, 0.1)
+
+# Set up to run simulations in parallel
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  # Run the simulation
+  run <- coRal::run_coral(time=time, env=env, pars=pars_dominance)
+
+  # Calculate C-N limitation
+  cnlim <- cn_limitation(run, pars_dominance)
+
+  # Possible measures of host healthy and functional symbiosis:
+  #host growth, lack of carbon limitation
+  posGrH <- (run$dH.Hdt[length(time)] > 0) # Is host growth positive?
+  noClimH <- (cnlim$H[length(time)] >= 0) # Is host NOT carbon-limited?
+  noClimS.1 <- (cnlim$S.1[length(time)] >= 0) # Is the sensitive symb. NOT carbon-limited?
+  noClimS.2 <- (cnlim$S.2[length(time)] >= 0) # Is the tolerant symb. NOT carbon-limited?
+  noClimAll <- noClimH & noClimS.1 & noClimS.2 # Are parties NOT carbon-limited?
+
+  # Symbiont dominance
+  logTS <- log(run$S.2[length(time)]) - log(run$S.1[length(time)]) # log sensitive:tolerant ratio
+  grS.1 <- run$dS.Sdt.1[length(time)] # Sensitive symb. per capita growth rate
+  grS.2 <- run$dS.Sdt.2[length(time)] # Tolerant symb. per capita growth rate
+
+  if(posGrH) {
+      if(logTS > 0) {
+        dominant_symb <- "Tolerant" # There are more tolerant than sensitive symbionts
+      } else if(logTS < 0) {
+        dominant_symb <- "Sensitive" # More sensitive than tolerant symbionts
+      } else if(logTS == 0) {
+        dominant_symb <- "Co-dominant" # Equal amounts of symbionts
+      } else {
+        dominant_symb <- NA # if logTS is not a number, something's gone wrong
+      }
+  } else {
+    dominant_symb <- "No-survival" # The host is dead so it doesn't matter who's dominant
+  }
+
+  # Return the environmental parameters, survival and dominance information
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH"=posGrH, "noClimAll"=noClimAll, "logTS"=logTS,
+    "grS.1"=grS.1, "grS.2"=grS.2, "dominant_symb"=dominant_symb)
+}
+
+# Stop the cluster
+stopCluster(cl)
+
+# Store results in dataframe, set column types
+sim_dominance <- data.frame(results, row.names=NULL)
+sim_dominance <- transform(sim_dominance, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH=as.logical(posGrH), noClimAll=as.logical(noClimAll), logTS=as.numeric(logTS),
+  grS.1=as.numeric(grS.1), grS.2=as.numeric(grS.2),
+  dominant_symb=factor(dominant_symb, levels=c("Sensitive", "Tolerant", "No-survival", "Co-dominant")))
+```
+
+
+```{r run-single-symb-sims, cache=TRUE, dependson=c("set-pars")}
+
+#### Determine where hosts can survive with a single symbiont  ####
+
+# MOVE THESE TO set-pars CODE CHUNK
+# sensitive symb. parameters
+pars_sen <- def_pars(nsym=1)
+pars_sen$initS <- 1
+
+# tolerant symb. parameters
+pars_tol <- def_pars(nsym=1)
+pars_tol$jCPm <- 1.0
+pars_tol$kROS <- 250
+pars_tol$jSGm <- 0.15
+pars_tol$initS <- 1
+
+# Run simulations for 2 years
+time<-seq(0, 2*365, 0.1)
+
+# Set up to run simulations in parallel
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+
+# results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  # Run the simulation
+  run_sen <- coRal::run_coral(time=time, env=env, pars=pars_sen)
+  run_tol <- coRal::run_coral(time=time, env=env, pars=pars_tol)
+
+  # Calculate C-N limitation
+  cnlim_sen <- cn_limitation(run_sen, pars_sen)
+  cnlim_tol <- cn_limitation(run_sen, pars_tol)
+
+  # Possible measures of host healthy and functional symbiosis:
+  # host growth, lack of carbon limitation
+  posGrH_sen <- (run_sen$dH.Hdt[length(time)] > 0) # Is host growth positive?
+  posGrH_tol <- (run_tol$dH.Hdt[length(time)] > 0)
+  noClimH_sen <- (cnlim_sen$H[length(time)] >= 0) # Is host NOT carbon-limited?
+  noClimH_tol <- (cnlim_tol$H[length(time)] >= 0)
+  noClimS_sen <- (cnlim_sen$S[length(time)] >= 0) # Is the symbiont NOT carbon-limited?
+  noClimS_tol <- (cnlim_tol$S[length(time)] >= 0)
+  noClimAll_sen <- noClimH_sen & noClimS_sen  # Are both parties NOT carbon-limited?
+  noClimAll_tol <- noClimH_tol & noClimS_tol
+
+
+  # Which symbiont(s) can the host survive with?
+    if(posGrH_sen) {
+      if(posGrH_tol) {
+        survival_1symb <- "Either" # Host can survive with either sensitive or tolerant symbiont
+      } else {
+        survival_1symb <- "Sensitive" # Host can survive with only the sensitive symbiont
+      }
+    } else if(posGrH_tol) {
+      survival_1symb <- "Tolerant" # Host can survive with only the tolerant symbiont
+    } else {
+      survival_1symb <- "No-survival" # Host cannot survive with either symbiont
+    }
+
+
+  # Return the environmental parameters, survival and dominance information
+  list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+    "posGrH_sen"=posGrH_sen, "posGrH_tol"=posGrH_tol, "noClimAll_sen"=noClimAll_sen,
+    "noClimAll_tol"=noClimAll_tol, "survival_1symb"=survival_1symb)
+}
+
+# Stop the cluster
+stopCluster(cl)
+
+# Store results in dataframe, set column types
+sim_1symb <- data.frame(results, row.names=NULL)
+sim_1symb <- transform(sim_1symb, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  posGrH_sen=as.logical(posGrH_sen), posGrH_tol=as.logical(posGrH_sen),
+  noClimAll_sen=as.logical(noClimAll_sen), noClimAll_tol=as.logical(noClimAll_tol),
+  survival_1symb=factor(survival_1symb, levels=c("Sensitive", "Tolerant", "Either", "No-survival")))
+```
+
+
+```{r run-tolerant-decay-sims, cache=TRUE, dependson=c("set-pars", "run-dominance-sims")}
+#### Simulate the "loss" of the tolerant symbiont when the sensitive symbiont dominates ####
+
+# Get the environments where the tolerant symbiont should be lost over time
+env_tol_loss <- sim_dominance[sim_dominance$dominant_symb == "Sensitive", c("L", "N", "X")]
+
+# Set up to run simulations in parallel
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# Results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_tol_loss), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- list(L=env_tol_loss[i, "L"], N=env_tol_loss[i, "N"], X=env_tol_loss[i, "X"])
+
+  # Run the simulation
+  run <- run_coral_decay(env=env, pars=pars_tol_loss, max_time=max_time, dt=dt, threshold=threshold)
+
+  # Was the threshold tolerant:sensitive ratio reached?
+  reachedThreshold <- run$reachedThreshold
+
+  # If so, when was the threshold reached?
+  if(reachedThreshold) {
+    lossTime <- run$fluxes$time[length(run$fluxes$time)]
+  } else {
+    lossTime <- NA
+  }
+
+  # Check that the host is alive
+  posGrH <- (run$fluxes$dH.Hdt[length(run$fluxes$dH.Hdt)] > 0)
+
+  # Check that host was alive at 100 days post-initialization
+  time <- seq(0, 100, 0.1)
+  env <- coRal::init_env(time, L=c(env_tol_loss[i, "L"], env_tol_loss[i, "L"], 0),
+    N=c(env_tol_loss[i, "N"], env_tol_loss[i, "N"], 0), X=c(env_tol_loss[i, "X"], env_tol_loss[i, "X"], 0))
+  run_survival <- coRal::run_coral(time=time, env=env, pars=pars_tol_loss)
+  posGrH100d <- (run_survival$dH.Hdt[length(time)] > 0)
+
+  # Return environmental parameters, whether the threshold was reached, and, if so, when
+  list("L"=env_tol_loss[i, "L"], "N"=env_tol_loss[i, "N"], "X"=env_tol_loss[i, "X"],
+    "reachedThreshold"=reachedThreshold, "lossTime"=lossTime, "posGrH"=posGrH,
+    "posGrH100d"=posGrH100d)
+}
+
+# Stop the cluster
+stopCluster(cl)
+
+# Store results in dataframe, set column types
+sim_tol_loss <- data.frame(results, row.names=NULL)
+sim_tol_loss <- transform(sim_tol_loss, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  reachedThreshold=as.logical(reachedThreshold), lossTime=as.numeric(lossTime),
+  posGrH=as.logical(posGrH), posGrH100d=as.logical(posGrH100d))
+
+
+```
+
+
+
+```{r run-sensitive-decay-sims, cache=TRUE, dependson=c("set-pars", "run-dominance-sims")}
+#### Simulate the "loss" of the sensitive symbiont when the tolerant symbiont dominates ####
+
+# Get the environments where the sensitive symbiont should be lost over time
+env_sen_loss <- sim_dominance[sim_dominance$dominant_symb == "Tolerant", c("L", "N", "X")]
+
+# Set up to run simulations in parallel
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# Results will temporarily hold the summary statistics from the simulations
+results <- foreach(i=1:nrow(env_sen_loss), .combine='rbind', .packages='dplyr') %dopar% {
+
+  # Set up the environmental conditions
+  env <- list(L=env_sen_loss[i, "L"], N=env_sen_loss[i, "N"], X=env_sen_loss[i, "X"])
+
+  # Run the simulation
+  run <- run_coral_decay(env=env, pars=pars_sen_loss, max_time=max_time, dt=dt, threshold=threshold)
+
+  # Was the threshold tolerant:sensitive ratio reached?
+  reachedThreshold <- run$reachedThreshold
+
+  # If so, when was the threshold reached?
+  if(reachedThreshold) {
+    lossTime <- run$fluxes$time[length(run$fluxes$time)]
+  } else {
+    lossTime <- NA
+  }
+
+  # Check that the host is alive
+  posGrH <- (run$fluxes$dH.Hdt[length(run$fluxes$dH.Hdt)] > 0)
+
+  # Check that host was alive at 100 days post-initialization
+  time <- seq(0, 100, 0.1)
+  env <- coRal::init_env(time, L=c(env_sen_loss[i, "L"], env_sen_loss[i, "L"], 0),
+    N=c(env_sen_loss[i, "N"], env_sen_loss[i, "N"], 0), X=c(env_sen_loss[i, "X"], env_sen_loss[i, "X"], 0))
+  run_survival <- coRal::run_coral(time=time, env=env, pars=pars_sen_loss)
+  posGrH100d <- (run_survival$dH.Hdt[length(time)] > 0)
+
+  # Return environmental parameters, whether the threshold was reached, and, if so, when
+  list("L"=env_sen_loss[i, "L"], "N"=env_sen_loss[i, "N"], "X"=env_sen_loss[i, "X"],
+    "reachedThreshold"=reachedThreshold, "lossTime"=lossTime, "posGrH"=posGrH,
+    "posGrH100d"=posGrH100d)
+}
+
+# Stop the cluster
+stopCluster(cl)
+
+# Store results in dataframe, set column types
+sim_sen_loss <- data.frame(results, row.names=NULL)
+sim_sen_loss <- transform(sim_sen_loss, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+  reachedThreshold=as.logical(reachedThreshold), lossTime=as.numeric(lossTime),
+  posGrH=as.logical(posGrH), posGrH100d=as.logical(posGrH100d))
+```
+
+# Where is each symbiont dominant?
+
+```{r plot-dominant-symb, cache=TRUE, dependson=c("run-dominance-sims"), fig.width=10, fig.height=5}
+#### Linear discriminant analysis ####
+
+# Center and scale the environmental variables
+datalda <- sim_dominance[, c("dominant_symb", "L", "N", "X")]
+datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+# Run the linear discriminant analysis
+outlda <- lda(dominant_symb ~ L + N + X, datalda)
+
+# Plot the data on the linear discriminant axes
+#pdf("dominant_symb.pdf", 10, 5)
+layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+  col=c(transparent(colSen, 0.25), transparent(colTol, 0.25), transparent(colNS, 0.25))[datalda$dominant_symb],
+	pch=c(pchSen, pchTol, pchNS)[datalda$dominant_symb],
+  xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+# Add arrows representing the environmental variables in LD space
+arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.15,
+  xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.35,
+  col="white", border=NA)
+text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.25, labels="Light", col="black")
+
+arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+  xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+  col="white", border=NA)
+text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Food") - 0.35, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Food") - 0.1,
+  xright=1.25*outlda$scaling[3,1] - 0.15, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Food") + 0.1,
+  col="white", border=NA)
+text(x=1.25*outlda$scaling[3,1] - 0.25, y=1.25*outlda$scaling[3,2], adj=1, labels="Food", col="black")
+
+#### Plot dominance outcome vs each environmental variable ####
+
+stackedHist(data=list(sim_dominance$L[(sim_dominance$dominant_symb == "Sensitive")],
+  sim_dominance$L[(sim_dominance$dominant_symb == "Tolerant")],
+  sim_dominance$L[(sim_dominance$dominant_symb == "No-survival")]),
+  breaks=seq(5, 60, 2.5), xlim=c(5, 60), colors=c(colSen, colTol, colNS),
+  xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+
+stackedHist(data=list(sim_dominance$N[(sim_dominance$dominant_symb == "Sensitive")],
+  sim_dominance$N[(sim_dominance$dominant_symb == "Tolerant")],
+  sim_dominance$N[(sim_dominance$dominant_symb == "No-survival")]),
+  colors=c(colSen, colTol, colNS),
+  xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+stackedHist(data=list(sim_dominance$X[(sim_dominance$dominant_symb == "Sensitive")],
+  sim_dominance$X[(sim_dominance$dominant_symb == "Tolerant")],
+  sim_dominance$X[(sim_dominance$dominant_symb == "No-survival")]),
+  colors=c(colSen, colTol, colNS),
+  xlab="Food (mol/L)", ylab="% Simulations", main="(d) Food")
+
+# Legend
+plot.new()
+legend("center", c("Sensitive symb.", "Tolerant symb.", "No survival"),
+	col=c(colSen, colTol, colNS), pch=c(pchSen, pchTol, pchNS),
+	title="Legend: Dominant symb.", cex=1.3, pt.cex=1.5)
+#dev.off()
+
+# Print the results of the linear discriminant analysis
+outlda
+```
+
+
+# How long does it take for the non-dominant symbiont to decrease to 1% of the total symbionts?
+
+```{r plot-loss-time-distribution, cache=TRUE, dependson=c("run-tolerant-decay-sims", "run-sensitive-decay-sims"), fig.width=12, fig.height=6}
+
+# Use the histogram function to sort the loss times <= 2 years into bins
+breaks <- c(seq(0, 365, length.out=13), 1.5*365, 2*365)
+
+hist_tol_loss <- hist(sim_tol_loss$lossTime[sim_tol_loss$reachedThreshold],
+  breaks=breaks, plot=FALSE)
+
+hist_sen_loss <- hist(sim_sen_loss$lossTime[sim_sen_loss$reachedThreshold],
+  breaks=breaks, plot=FALSE)
+
+# Convert bin heights to % of simulations
+hist_tol_loss$density <- hist_tol_loss$counts / nrow(sim_tol_loss) * 100
+hist_sen_loss$density <- hist_sen_loss$counts / nrow(sim_sen_loss) * 100
+
+# Put the bin heights together in a matrix
+loss_time_mat <- matrix(c(hist_tol_loss$density, hist_sen_loss$density), byrow=TRUE, nrow=2)
+
+# Add a column to the matrix for loss times > 2 years
+loss_time_mat <- cbind(loss_time_mat, c(NA, NA))
+loss_time_mat[1, 15] <- sum(!(sim_tol_loss$reachedThreshold)) / nrow(sim_tol_loss) * 100
+loss_time_mat[2, 15] <- sum(!(sim_sen_loss$reachedThreshold)) / nrow(sim_sen_loss) * 100
+
+
+# Barplot
+par(cex.axis=0.75)
+barplot(loss_time_mat,
+	names=c(paste0(seq(0, 10), "-", seq(1, 11), " mo"), "11 mo-1 yr", "1-1.5 yr", "1.5-2 yr", "> 2 yr"),
+	xlab="Time till non-dominant symbiont declines to 1% of total symbionts", ylab="% of simulations",
+  main="Time it takes non-dominant symbiont to decay",
+	beside=TRUE, col=c(colTol, colSen))
+
+legend("topleft", c("Loss of tol. symb.", "Loss of sen. symb"), pch=22,
+  pt.bg=c(colTol, colSen), col="black")
+```
+
+
+# How do environmental variables affect the rate of symbiont loss?
+
+```{r plot-environment-vs-loss, cache=TRUE, dependson=c("run-tolerant-decay-sims", "run-sensitive-decay-sims")}
+par(mfrow=c(2, 2))
+
+## Light
+
+plot(sim_tol_loss$L[sim_tol_loss$reachedThreshold & sim_tol_loss$posGrH],
+	sim_tol_loss$lossTime[sim_tol_loss$reachedThreshold & sim_tol_loss$posGrH],
+	xlim=c(5, 60), ylim=c(0, 2*365+20), xlab="Light (mol photons/m^2/day)",
+	ylab="Time for symbiont to decay (days)", col=colTol, pch=pchTol,
+	main="(a) Light")
+
+points(sim_sen_loss$L[sim_sen_loss$reachedThreshold & sim_sen_loss$posGrH],
+	sim_sen_loss$lossTime[sim_sen_loss$reachedThreshold & sim_sen_loss$posGrH],
+	col=colSen, pch=pchSen)
+
+points(sim_tol_loss$L[!(sim_tol_loss$reachedThreshold) & sim_tol_loss$posGrH],
+	rep(750, sum(!(sim_tol_loss$reachedThreshold) & sim_tol_loss$posGrH)),
+	col=colTol, pch=17)
+
+points(sim_sen_loss$L[!(sim_sen_loss$reachedThreshold) & sim_sen_loss$posGrH],
+	rep(750, sum(!(sim_sen_loss$reachedThreshold) & sim_sen_loss$posGrH)),
+	col=colSen, pch=2)
+
+points(sim_tol_loss$L[!(sim_tol_loss$posGrH)],
+	rep(0, sum(!(sim_tol_loss$posGrH))),
+	col=colTol, pch=8)
+
+points(sim_sen_loss$L[!(sim_sen_loss$posGrH)],
+	rep(0, sum(!(sim_sen_loss$posGrH))),
+	col=colSen, pch=4)
+
+## Nitrogen
+
+plot(sim_tol_loss$N[sim_tol_loss$reachedThreshold & sim_tol_loss$posGrH],
+	sim_tol_loss$lossTime[sim_tol_loss$reachedThreshold & sim_tol_loss$posGrH],
+	xlim=c(1e-8, 1e-5), ylim=c(0, 2*365+20), xlab="Nitrogen (mol/L)",
+	ylab="Time for symbiont to decay (days)", col=colTol, pch=pchTol,
+	main="(b) Nitrogen")
+
+points(sim_sen_loss$N[sim_sen_loss$reachedThreshold & sim_sen_loss$posGrH],
+	sim_sen_loss$lossTime[sim_sen_loss$reachedThreshold & sim_sen_loss$posGrH],
+	col=colSen, pch=pchSen)
+
+points(sim_tol_loss$N[!(sim_tol_loss$reachedThreshold) & sim_tol_loss$posGrH],
+	rep(750, sum(!(sim_tol_loss$reachedThreshold) & sim_tol_loss$posGrH)),
+	col=colTol, pch=17)
+
+points(sim_sen_loss$N[!(sim_sen_loss$reachedThreshold) & sim_sen_loss$posGrH],
+	rep(750, sum(!(sim_sen_loss$reachedThreshold) & sim_sen_loss$posGrH)),
+	col=colSen, pch=2)
+
+points(sim_tol_loss$N[!(sim_tol_loss$posGrH)],
+	rep(0, sum(!(sim_tol_loss$posGrH))),
+	col=colTol, pch=8)
+
+points(sim_sen_loss$N[!(sim_sen_loss$posGrH)],
+	rep(0, sum(!(sim_sen_loss$posGrH))),
+	col=colSen, pch=4)
+
+
+## Food
+
+plot(sim_tol_loss$X[sim_tol_loss$reachedThreshold & sim_tol_loss$posGrH],
+	sim_tol_loss$lossTime[sim_tol_loss$reachedThreshold & sim_tol_loss$posGrH],
+	xlim=c(0, 4e-7), ylim=c(0, 2*365+20), xlab="Food (mol/L)",
+	ylab="Time for symbiont to decay (days)", col=colTol, pch=pchTol,
+	main="(c) Food")
+
+points(sim_sen_loss$X[sim_sen_loss$reachedThreshold & sim_sen_loss$posGrH],
+	sim_sen_loss$lossTime[sim_sen_loss$reachedThreshold & sim_sen_loss$posGrH],
+	col=colSen, pch=pchSen)
+
+points(sim_tol_loss$X[!(sim_tol_loss$reachedThreshold) & sim_tol_loss$posGrH],
+	rep(750, sum(!(sim_tol_loss$reachedThreshold) & sim_tol_loss$posGrH)),
+	col=colTol, pch=17)
+
+points(sim_sen_loss$X[!(sim_sen_loss$reachedThreshold) & sim_sen_loss$posGrH],
+	rep(750, sum(!(sim_sen_loss$reachedThreshold) & sim_sen_loss$posGrH)),
+	col=colSen, pch=2)
+
+points(sim_tol_loss$X[!(sim_tol_loss$posGrH)],
+	rep(0, sum(!(sim_tol_loss$posGrH))),
+	col=colTol, pch=8)
+
+points(sim_sen_loss$X[!(sim_sen_loss$posGrH)],
+	rep(0, sum(!(sim_sen_loss$posGrH))),
+	col=colSen, pch=4)
+
+
+## legend
+
+```
+
+
+```{r}
+
+par(mfrow=c(2,2))
+myhist <- hist(sim_tol_loss$L, xlab="Light (mol photons/m^2/day)", ylab="# sims")
+hist(sim_tol_loss$L[sim_tol_loss$posGrH & !(sim_tol_loss$reachedThreshold)], col=rgb(1, 0, 0, 0.25), add=TRUE,
+	breaks=myhist$breaks)
+hist(sim_tol_loss$L[!(sim_tol_loss$posGrH)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
+
+myhist <- hist(sim_tol_loss$N, xlab="Nitrogen (mol/L)", ylab="# sims")
+hist(sim_tol_loss$N[sim_tol_loss$posGrH & !(sim_tol_loss$reachedThreshold)], col=rgb(1, 0, 0, 0.25), add=TRUE,
+	breaks=myhist$breaks)
+hist(sim_tol_loss$N[!(sim_tol_loss$posGrH)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
+
+myhist <- hist(sim_tol_loss$X, xlab="Food (mol/L)", ylab="# sims")
+hist(sim_tol_loss$X[sim_tol_loss$posGrH & !(sim_tol_loss$reachedThreshold)], col=rgb(1, 0, 0, 0.25), add=TRUE,
+	breaks=myhist$breaks)
+hist(sim_tol_loss$X[!(sim_tol_loss$posGrH)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
+
+plot.new()
+legend("top", c("All sen. dominant sims", "Takes >2 years to decay", "Host dies"),
+	pch=22, col="black", pt.bg=c("white", rgb(1, 0, 0, 0.25), rgb(0, 0, 1, 0.25)))
+
+
+
+par(mfrow=c(2,2))
+myhist <- hist(sim_sen_loss$L, xlab="Light (mol photons/m^2/day)", ylab="# sims")
+hist(sim_sen_loss$L[sim_sen_loss$posGrH & !(sim_sen_loss$reachedThreshold)], col=rgb(1, 0, 0, 0.25), add=TRUE,
+	breaks=myhist$breaks)
+hist(sim_sen_loss$L[!(sim_sen_loss$posGrH)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
+
+myhist <- hist(sim_sen_loss$N, xlab="Nitrogen (mol/L)", ylab="# sims")
+hist(sim_sen_loss$N[sim_sen_loss$posGrH & !(sim_sen_loss$reachedThreshold)], col=rgb(1, 0, 0, 0.25), add=TRUE,
+	breaks=myhist$breaks)
+hist(sim_sen_loss$N[!(sim_sen_loss$posGrH)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
+
+myhist <- hist(sim_sen_loss$X, xlab="Food (mol/L)", ylab="# sims")
+hist(sim_sen_loss$X[sim_sen_loss$posGrH & !(sim_sen_loss$reachedThreshold)], col=rgb(1, 0, 0, 0.25), add=TRUE,
+	breaks=myhist$breaks)
+hist(sim_sen_loss$X[!(sim_sen_loss$posGrH)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
+
+plot.new()
+legend("top", c("All tol. dominant sims", "Takes >2 years to decay", "Host dies"),
+	pch=22, col="black", pt.bg=c("white", rgb(1, 0, 0, 0.25), rgb(0, 0, 1, 0.25)))
+```
+
+# What do the dynamics of symbiont loss look like?
+
+```{r plot-loss-dynamics, cache=TRUE, dependson=c("set-pars", "run-tolerant-decay-sims", "run-sensitive-decay-sims")}
+time <- seq(0, 2*365)
+
+par(mfrow=c(4,3))
+for(i in 1:4) {
+  Li <- sim_tol_loss[i, "L"]
+  Ni <- sim_tol_loss[i, "N"]
+  Xi <- sim_tol_loss[i, "X"]
+
+  env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+
+  run <- coRal::run_coral(time=time, env=env, pars=pars_tol_loss)
+  run2 <- coRal::run_coral(time=time, env=env, pars=pars_dominance)
+
+  minSH <- min(run$S.1/run$H, run$S.2/run$H)
+  maxSH <- max(run$S.1/run$H, run$S.2/run$H)
+
+  plot(time, run$S.1/run$H, type="l", col=colSen, xlab="time (days)", ylab="S/H ratio",
+    main=paste("Sim", i), ylim=c(minSH, maxSH), log="y")
+  lines(time, run$S.2/run$H, col=colTol)
+
+  minSH <- min(run2$S.1/run2$H, run2$S.2/run2$H)
+  maxSH <- max(run2$S.1/run2$H, run2$S.2/run2$H)
+
+  plot(time, run2$S.1/run2$H, type="l", col=colSen, xlab="time (days)", ylab="S/H ratio",
+    main=paste("Sim", i), ylim=c(minSH, maxSH), log="y")
+  lines(time, run2$S.2/run2$H, col=colTol)
+
+  minGr <- min(c(run$dH.Hdt[-1], run2$dH.Hdt[-1]))
+  maxGr <- max(c(run$dH.Hdt[-1], run2$dH.Hdt[-1]))
+
+  plot(time[-1], run$dH.Hdt[-1], col="gray", type="l", lwd=2, xlab="time (days)",
+  ylab="Host growth rate", main=paste("Sim", i), ylim=c(minGr, maxGr))
+
+  lines(time[-1], run2$dH.Hdt[-1], col="black")
+}
+```
+
+```{r}
+par(mfrow=c(2,2))
+
+i <- 2
+
+Li <- sim_tol_loss[i, "L"]
+Ni <- sim_tol_loss[i, "N"]
+Xi <- sim_tol_loss[i, "X"]
+
+env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
+
+run <- coRal::run_coral(time=time, env=env, pars=pars_tol_loss)
+run2 <- coRal::run_coral(time=time, env=env, pars=pars_dominance)
+
+minSH <- min(run$S.1/run$H, run$S.2/run$H)
+maxSH <- max(run$S.1/run$H, run$S.2/run$H)
+
+plot(time, run$S.1/run$H, type="l", col=colSen, xlab="time (days)", ylab="S/H ratio",
+  main="Initialized with 1 C-mol host\n0.5 C-mol S. symb, 0.5 C-mol T. symb",
+  ylim=c(minSH, maxSH), log="y")
+lines(time, run$S.2/run$H, col=colTol)
+
+legend("topright", c("Sensitive (S) symb.", "Tolerant (T) symb."),
+  lwd=c(1, 1), col=c(colSen, colTol))
+
+minSH <- min(run2$S.1/run2$H, run2$S.2/run2$H)
+maxSH <- max(run2$S.1/run2$H, run2$S.2/run2$H)
+
+plot(time, run2$S.1/run2$H, type="l", col=colSen, xlab="time (days)", ylab="S/H ratio",
+  main="Initialized with 1 C-mol host\n0.01 C-mol S. symb, 0.99 C-mol T. symb",
+  ylim=c(minSH, maxSH), log="y")
+lines(time, run2$S.2/run2$H, col=colTol)
+
+legend("topright", c("Sensitive (S) symb.", "Tolerant (T) symb."),
+  lwd=c(1, 1), col=c(colSen, colTol))
+
+minGr <- min(c(run$dH.Hdt[-1], run2$dH.Hdt[-1]))
+maxGr <- max(c(run$dH.Hdt[-1], run2$dH.Hdt[-1]))
+
+plot(time[-1], run$dH.Hdt[-1], col="gray", type="l", lwd=2, xlab="time (days)",
+ylab="Host per capita growth rate", main="Host growth rate\n(both initial conditions)", ylim=c(minGr, maxGr))
+
+lines(time[-1], run2$dH.Hdt[-1], col="black")
+
+legend("topright", c("0.5 C-mol S, 0.5 C-mol T", "0.01 C-mol S, 0.99 C-mol T"),
+  lwd=c(2, 1), col=c("gray", "black"))
+
+print(paste0("Light = ", Li, " mol photons/m^2/day, Nitrogen = ", Ni, " mol/L, Food = ", Xi, " mol/L"))
+```
+
+
+```{r}
+# How many cases where the sensitive symb. was dominant were in environments where the host could only survive
+# with the sensitive symbiont?
+sum((sim_dominance$dominant_symb == "Sensitive") &
+	(sim_1symb$survival_1symb == "Sensitive")) / sum(sim_dominance$dominant_symb == "Sensitive")
+
+# How many of those were where the host could survive with either symbiont?
+sum((sim_dominance$dominant_symb == "Sensitive") &
+	(sim_1symb$survival_1symb == "Either")) / sum(sim_dominance$dominant_symb == "Sensitive")
+
+# How many were where the host couldn't survive with the sensitive symbiont at all (this would be weird)?
+sum((sim_dominance$dominant_symb == "Sensitive") & ((sim_1symb$survival_1symb == "Tolerant") |
+	(sim_1symb$survival_1symb == "No-survival"))) / sum(sim_dominance$dominant_symb == "Sensitive")
+
+
+
+
+
+# How many cases where the tolerant symb. was dominant were in environments where the host could only survive
+# with the tolerant symbiont?
+sum((sim_dominance$dominant_symb == "Tolerant") &
+	(sim_1symb$survival_1symb == "Tolerant")) / sum(sim_dominance$dominant_symb == "Tolerant")
+
+# How many of those were where the host could survive with either symbiont?
+sum((sim_dominance$dominant_symb == "Tolerant") &
+	(sim_1symb$survival_1symb == "Either")) / sum(sim_dominance$dominant_symb == "Tolerant")
+
+# How many were there where the host couldn't survive with the tolerant symbiont at all (this would be weird)?
+sum((sim_dominance$dominant_symb == "Tolerant") & ((sim_1symb$survival_1symb == "Sensitive") |
+	(sim_1symb$survival_1symb == "No-survival"))) / sum(sim_dominance$dominant_symb == "Tolerant")
+
+
+
+## These statistics don't neccesarily line up perfectly with being able to survive with 99% non-dominant symbiont
+# How many sensitive-dominant cases where the host failed to survive with 99% tolerant were in regions
+# where the host couldn't survive with the tolerant symbiont alone? (all but literally 1 case)
+sen_1symb <- sim_1symb[sim_dominance$dominant_symb == "Sensitive",]
+sum((sen_1symb$survival_1symb == "Sensitive") & !(sim_tol_loss$posGrH)) / sum(!(sim_tol_loss$posGrH))
+
+# How many tolerant-dominant cases where the host failed to survive with 99% sensitive were in regions
+# where the host couldn't survive with the sensitive symbiont alone? (all cases)
+tol_1symb <- sim_1symb[sim_dominance$dominant_symb == "Tolerant",]
+sum((tol_1symb$survival_1symb == "Tolerant") & !(sim_sen_loss$posGrH)) / sum(!(sim_sen_loss$posGrH))
+
+
+
+# Let's look at that one case where the host could survive with either alone but not with 99% tolerant
+pt <- sim_tol_loss[!(sim_tol_loss$posGrH) & (sen_1symb$survival_1symb != "Sensitive"),]
+time <- seq(0, 3*365, 0.1)
+env <- init_env(time, L=c(pt$L, pt$L, 0), N=c(pt$N, pt$N, 0), X=c(pt$X, pt$X, 0))
+run <- run_coral(time, env, pars_tol_loss)
+plot(time, run$S.1/run$H, col=colSen, type="l", ylim=c(0, max(c(run$S.1/run$H, run$S.2/run$H))))
+lines(time, run$S.2/run$H, col=colTol)
+plot(time[-1], run$dH.Hdt[-1], type="l")
+lines(time, rep(0, length(time)), col="pink")
+
+runS <- run_coral(time, env, pars_sen)
+plot(time, runS$S/runS$H, type="l")
+plot(time[-1], runS$dH.Hdt[-1], type="l")
+lines(time, rep(0, length(time)), col="pink")
+
+runT <- run_coral(time, env, pars_tol)
+plot(time, runT$S/runT$H, type="l")
+plot(time[-1], runT$dH.Hdt[-1], type="l")
+lines(time, rep(0, length(time)), col="pink")
+```
