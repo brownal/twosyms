@@ -47,15 +47,15 @@ pchRescue <- 15
 
 We want to know:
 
-1. When sensitive and tolerant symbionts are both present in the host, which is more common (the "dominant" symbiont)?
-2. How long the host can sustain the non-dominant symbiont at appreciable levels?
+1. When sensitive and tolerant symbionts are both present in the host, which is superior competitor?
+2. How long the host can sustain the inferior competitor at appreciable levels?
 
 We found:
 
-1. Light is the major factor that affects the dominant symbiont. High light favors tolerant symbionts.
-2. Food and nitrogen determine host survival at high light but have little effect on which symbiont dominates.
-3. The non-dominant symbiont is lost more slowly when light is intermediate.
-4. The amount of non-dominant symbiont present affects the rate of its competitive exclusion (i.e. log(tolerant/sensitive) vs time is not linear).
+1. Light is the major factor that affects the outcome of symbiont competition. High light favors tolerant symbionts.
+2. Food and nitrogen determine host survival at high light but have little effect on which symbiont is the superior competitor.
+3. The inferior competitor is lost more slowly when light is intermediate.
+4. The amount of symbiont present affects the rate of its competitive exclusion (i.e. log(tolerant/sensitive) vs time is not linear).
 
 
 # Simulate bleached hosts
@@ -63,13 +63,13 @@ We found:
 ```{r set-pars, cache=TRUE}
 #### Set parameters ####
 
-# Parameters for determining dominant symbiont. Initialize the symbionts as a
+# Parameters for determining outcome of symbiont competition. Initialize the symbionts as a
 # 50-50 mix. Here sensitive symbiont is symbiont 1; tolerant is symbiont 2
-pars_dominance <- def_pars(nsym=2)
-pars_dominance$jCPm[2] <- 1.0
-pars_dominance$kROS[2] <- 250
-pars_dominance$jSGm[2] <- 0.15
-pars_dominance$initS[1:2] <- c(0.5, 0.5)
+pars_competition <- def_pars(nsym=2)
+pars_competition$jCPm[2] <- 1.0
+pars_competition$kROS[2] <- 250
+pars_competition$jSGm[2] <- 0.15
+pars_competition$initS[1:2] <- c(0.5, 0.5)
 
 
 # To determine how quickly the tolerant symbiont is lost, we set
@@ -105,19 +105,19 @@ pars_tol$initS <- 1
 
 
 # Randomly draw the environmental parameters
-env_params <- data.frame("L"=runif(10000, 5, 60), # Light, choose values between 5 and 60
-                            "N"=runif(10000, 1e-8, 1e-5), # DIN, choose values between 1e-8 and 1e-5
-                            "X" = runif(10000, 0, 4e-7)) # Food, choose values between 0 and 4e-7
+env_params <- data.frame("L"=runif(10000, 5, 60), # Light, choose values between 5 and 60 mol photons/m^2/d
+                            "N"=runif(10000, 1e-8, 1e-5), # DIN, choose values between 1e-8 and 1e-5 mol/L
+                            "X" = runif(10000, 0, 4e-7)) # Food, choose values between 0 and 4e-7 mol/L
 
 # Parameters for symbiont competitive exclusion simulations
 threshold <- 0.01/0.99 # Calculate how long it takes for the symbiont to decline to 1% of the total symbionts
-max_time <- 365*100 # Give up if threshold has not been reached after 100 years
+max_time <- 365*50 # Give up if threshold has not been reached after 50 years
 dt <- 0.1 # Simulate taking time steps of 0.1 day
 ```
 
 
-```{r run-dominance-sims, cache=TRUE, dependson=c("set-pars")}
-#### Determine which symbiont dominates the host under various environmental conditions ####
+```{r run-competition-sims, cache=TRUE, dependson=c("set-pars")}
+#### Determine the outcome of symbiont competition under various environmental conditions ####
 
 # Run simulations for 10 years
 time<-seq(0, 10*365, 0.1)
@@ -135,10 +135,10 @@ results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %d
     N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
 
   # Run the simulation
-  run <- coRal::run_coral(time=time, env=env, pars=pars_dominance)
+  run <- coRal::run_coral(time=time, env=env, pars=pars_competition)
 
   # Calculate C-N limitation
-  cnlim <- cn_limitation(run, pars_dominance)
+  cnlim <- cn_limitation(run, pars_competition)
 
   # Possible measures of host healthy and functional symbiosis:
   #host growth, lack of carbon limitation
@@ -148,40 +148,40 @@ results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %d
   noClimS.2 <- (cnlim$S.2[length(time)] >= 0) # Is the tolerant symb. NOT carbon-limited?
   noClimAll <- noClimH & noClimS.1 & noClimS.2 # Are parties NOT carbon-limited?
 
-  # Symbiont dominance
+  # Which symbiont is the superior competitor?
   logTS <- log(run$S.2[length(time)]) - log(run$S.1[length(time)]) # log sensitive:tolerant ratio
   grS.1 <- run$dS.Sdt.1[length(time)] # Sensitive symb. per capita growth rate
   grS.2 <- run$dS.Sdt.2[length(time)] # Tolerant symb. per capita growth rate
 
   if(posGrH & noClimAll) {
       if(logTS > 0) {
-        dominant_symb <- "Tolerant" # There are more tolerant than sensitive symbionts
+        sup_competitor <- "Tolerant" # There are more tolerant than sensitive symbionts
       } else if(logTS < 0) {
-        dominant_symb <- "Sensitive" # More sensitive than tolerant symbionts
+        sup_competitor <- "Sensitive" # More sensitive than tolerant symbionts
       } else if(logTS == 0) {
-        dominant_symb <- "Co-dominant" # Equal amounts of symbionts
+        sup_competitor <- "Equal-competitors" # Equal amounts of symbionts
       } else {
-        dominant_symb <- NA # if logTS is not a number, something's gone wrong
+        sup_competitor <- NA # if logTS is not a number, something's gone wrong
       }
   } else {
-    dominant_symb <- "No-survival" # The host is dead so it doesn't matter who's dominant
+    sup_competitor <- "No-survival" # The host is dead so symbiont competition doesn't matter
   }
 
-  # Return the environmental parameters, survival and dominance information
+  # Return the environmental parameters, survival and competition information
   list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
     "posGrH"=posGrH, "noClimAll"=noClimAll, "logTS"=logTS,
-    "grS.1"=grS.1, "grS.2"=grS.2, "dominant_symb"=dominant_symb)
+    "grS.1"=grS.1, "grS.2"=grS.2, "sup_competitor"=sup_competitor)
 }
 
 # Stop the cluster
 stopCluster(cl)
 
 # Store results in dataframe, set column types
-sim_dominance <- data.frame(results, row.names=NULL)
-sim_dominance <- transform(sim_dominance, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+sim_competition <- data.frame(results, row.names=NULL)
+sim_competition <- transform(sim_competition, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
   posGrH=as.logical(posGrH), noClimAll=as.logical(noClimAll), logTS=as.numeric(logTS),
   grS.1=as.numeric(grS.1), grS.2=as.numeric(grS.2),
-  dominant_symb=factor(dominant_symb, levels=c("Sensitive", "Tolerant", "No-survival", "Co-dominant")))
+  sup_competitor=factor(sup_competitor, levels=c("Sensitive", "Tolerant", "No-survival", "Equal-competitors")))
 ```
 
 
@@ -238,7 +238,7 @@ results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %d
     }
 
 
-  # Return the environmental parameters, survival and dominance information
+  # Return the environmental parameters, survival and competition information
   list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
     "posGrH_sen"=posGrH_sen, "posGrH_tol"=posGrH_tol, "noClimAll_sen"=noClimAll_sen,
     "noClimAll_tol"=noClimAll_tol, "survival_1symb"=survival_1symb)
@@ -256,11 +256,11 @@ sim_1symb <- transform(sim_1symb, L=as.numeric(L), N=as.numeric(N), X=as.numeric
 ```
 
 
-```{r run-tolerant-exclusion-sims, cache=TRUE, dependson=c("set-pars", "run-dominance-sims")}
+```{r run-tolerant-exclusion-sims, cache=TRUE, dependson=c("set-pars", "run-competition-sims")}
 #### Simulate the competitive exclusion of the tolerant symbiont ####
 
 # Get the environments where the tolerant symbiont should be lost over time
-env_tol_exclusion <- sim_dominance[sim_dominance$dominant_symb == "Sensitive", c("L", "N", "X")]
+env_tol_exclusion <- sim_competition[sim_competition$sup_competitor == "Sensitive", c("L", "N", "X")]
 
 # Set up to run simulations in parallel
 cl <- makeCluster(detectCores() - 1)
@@ -284,7 +284,7 @@ results <- foreach(i=1:nrow(env_tol_exclusion), .combine='rbind', .packages='dpl
   } else {
     exclusionTime <- NA
   }
-
+  print("Got here")
   # Check that the host is alive
   cnlim <- cn_limitation(run$fluxes, pars_tol_exclusion) # Calculate carbon/nitrogen limitation
   posGrH <- (run$fluxes$dH.Hdt[length(run$fluxes$dH.Hdt)] > 0) # Is the host growing?
@@ -327,11 +327,11 @@ sim_tol_exclusion <- transform(sim_tol_exclusion, L=as.numeric(L), N=as.numeric(
 
 
 
-```{r run-sensitive-exclusion-sims, cache=TRUE, dependson=c("set-pars", "run-dominance-sims")}
+```{r run-sensitive-exclusion-sims, cache=TRUE, dependson=c("set-pars", "run-competition-sims")}
 #### Simulate the competitive exclusion of the sensitive symbiont ####
 
 # Get the environments where the sensitive symbiont should be lost over time
-env_sen_exclusion <- sim_dominance[sim_dominance$dominant_symb == "Tolerant", c("L", "N", "X")]
+env_sen_exclusion <- sim_competition[sim_competition$sup_competitor == "Tolerant", c("L", "N", "X")]
 
 # Set up to run simulations in parallel
 cl <- makeCluster(detectCores() - 1)
@@ -396,27 +396,27 @@ sim_sen_exclusion <- transform(sim_sen_exclusion, L=as.numeric(L), N=as.numeric(
 
 ```
 
-# Where is each symbiont dominant?
+# Where is each symbiont the superior competitor?
 
-```{r plot-dominant-symb, cache=TRUE, dependson=c("run-dominance-sims"), fig.width=10, fig.height=5}
+```{r plot-symb-competition, cache=TRUE, dependson=c("run-competition-sims"), fig.width=10, fig.height=5}
 #### Linear discriminant analysis ####
 
 # Center and scale the environmental variables
-datalda <- sim_dominance[, c("dominant_symb", "L", "N", "X")]
+datalda <- sim_competition[, c("sup_competitor", "L", "N", "X")]
 datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
 datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
 datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
 
 # Run the linear discriminant analysis
-outlda <- lda(dominant_symb ~ L + N + X, datalda)
+outlda <- lda(sup_competitor ~ L + N + X, datalda)
 
 # Plot the data on the linear discriminant axes
-#pdf("dominant_symb.pdf", 10, 5)
+#pdf("sup_competitor.pdf", 10, 5)
 layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
 
 plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
-  col=c(transparent(colSen, 0.25), transparent(colTol, 0.25), transparent(colNS, 0.25))[datalda$dominant_symb],
-	pch=c(pchSen, pchTol, pchNS)[datalda$dominant_symb],
+  col=c(transparent(colSen, 0.25), transparent(colTol, 0.25), transparent(colNS, 0.25))[datalda$sup_competitor],
+	pch=c(pchSen, pchTol, pchNS)[datalda$sup_competitor],
   xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
 
 # Add arrows representing the environmental variables in LD space
@@ -441,24 +441,24 @@ rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Food") - 0.35, ybottom=1.25*outl
   col="white", border=NA)
 text(x=1.25*outlda$scaling[3,1] - 0.25, y=1.25*outlda$scaling[3,2], adj=1, labels="Food", col="black")
 
-#### Plot dominance outcome vs each environmental variable ####
+#### Plot competition outcome vs each environmental variable ####
 
-stackedHist(data=list(sim_dominance$L[(sim_dominance$dominant_symb == "Sensitive")],
-  sim_dominance$L[(sim_dominance$dominant_symb == "Tolerant")],
-  sim_dominance$L[(sim_dominance$dominant_symb == "No-survival")]),
+stackedHist(data=list(sim_competition$L[(sim_competition$sup_competitor == "Sensitive")],
+  sim_competition$L[(sim_competition$sup_competitor == "Tolerant")],
+  sim_competition$L[(sim_competition$sup_competitor == "No-survival")]),
   breaks=seq(5, 60, 2.5), xlim=c(5, 60), colors=c(colSen, colTol, colNS),
   xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
 
 
-stackedHist(data=list(sim_dominance$N[(sim_dominance$dominant_symb == "Sensitive")],
-  sim_dominance$N[(sim_dominance$dominant_symb == "Tolerant")],
-  sim_dominance$N[(sim_dominance$dominant_symb == "No-survival")]),
+stackedHist(data=list(sim_competition$N[(sim_competition$sup_competitor == "Sensitive")],
+  sim_competition$N[(sim_competition$sup_competitor == "Tolerant")],
+  sim_competition$N[(sim_competition$sup_competitor == "No-survival")]),
   colors=c(colSen, colTol, colNS),
   xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
-stackedHist(data=list(sim_dominance$X[(sim_dominance$dominant_symb == "Sensitive")],
-  sim_dominance$X[(sim_dominance$dominant_symb == "Tolerant")],
-  sim_dominance$X[(sim_dominance$dominant_symb == "No-survival")]),
+stackedHist(data=list(sim_competition$X[(sim_competition$sup_competitor == "Sensitive")],
+  sim_competition$X[(sim_competition$sup_competitor == "Tolerant")],
+  sim_competition$X[(sim_competition$sup_competitor == "No-survival")]),
   colors=c(colSen, colTol, colNS),
   xlab="Food (mol/L)", ylab="% Simulations", main="(d) Food")
 
@@ -466,7 +466,7 @@ stackedHist(data=list(sim_dominance$X[(sim_dominance$dominant_symb == "Sensitive
 plot.new()
 legend("center", c("Sensitive symb.", "Tolerant symb.", "No survival"),
 	col=c(colSen, colTol, colNS), pch=c(pchSen, pchTol, pchNS),
-	title="Legend: Dominant symb.", cex=1.3, pt.cex=1.5)
+	title="Legend: Superior competitor", cex=1.3, pt.cex=1.5)
 #dev.off()
 
 # Print the results of the linear discriminant analysis
@@ -474,7 +474,7 @@ outlda
 ```
 
 
-# How long does it take for the non-dominant symbiont to decrease to 1% of the total symbionts?
+# How long does it take for the inferior competitor to be competitively excluded (i.e. to be <= 1% of the total symbionts)?
 
 ```{r plot-exclusion-time-distribution, cache=TRUE, dependson=c("run-tolerant-exclusion-sims", "run-sensitive-exclusion-sims"), fig.width=12, fig.height=6}
 
@@ -509,8 +509,8 @@ exclusion_time_mat[2, 1] <- sum(!(sim_sen_exclusion$posGrH & sim_sen_exclusion$n
 par(cex.axis=0.75)
 barplot(exclusion_time_mat,
 	names=c("Host dies", paste0(seq(0, 10, 2), "-", seq(2, 12, 2), " mo"), "1-1.5 yr", "1.5-2 yr", "2-5 yr", "5-25 yr", "25-50 yr", "50-100 yr", ">100 yr"),
-	xlab="Time till non-dominant symbiont declines to 1% of total symbionts", ylab="% of simulations",
-  main="Time it takes non-dominant symbiont to be competitively excluded",
+	xlab="Time till inferior competitor declines to 1% of total symbionts", ylab="% of simulations",
+  main="Time it takes inferior competitor to be competitively excluded",
 	beside=TRUE, col=c(colTol, colSen))
 
 legend("topleft", c("Comp. exclusion of tol. symb.", "Comp. exclusion of sen. symb"), pch=22,
@@ -609,7 +609,7 @@ myhist <- hist(sim_tol_exclusion$X, xlab="Food (mol/L)", ylab="# sims")
 hist(sim_tol_exclusion$X[!(sim_tol_exclusion$posGrH & sim_tol_exclusion$noClimAll)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
 
 plot.new()
-legend("top", c("All sen. dominant sims", "Host dies"),
+legend("top", c("All sims w/ sen. sup. comp.", "Host dies"),
 	pch=22, col="black", pt.bg=c("white", rgb(0, 0, 1, 0.25)))
 
 
@@ -625,7 +625,7 @@ myhist <- hist(sim_sen_exclusion$X, xlab="Food (mol/L)", ylab="# sims")
 hist(sim_sen_exclusion$X[!(sim_sen_exclusion$posGrH & sim_sen_exclusion$noClimAll)], add=TRUE, breaks=myhist$breaks, col=rgb(0, 0, 1, 0.25))
 
 plot.new()
-legend("top", c("All tol. dominant sims", "Host dies"),
+legend("top", c("All sims tol. sup. comp.", "Host dies"),
 	pch=22, col="black", pt.bg=c("white", rgb(0, 0, 1, 0.25)))
 ```
 
@@ -643,7 +643,7 @@ for(i in 1:4) {
   env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
 
   run <- coRal::run_coral(time=time, env=env, pars=pars_tol_exclusion)
-  run2 <- coRal::run_coral(time=time, env=env, pars=pars_dominance)
+  run2 <- coRal::run_coral(time=time, env=env, pars=pars_competition)
 
   minSH <- min(run$S.1/run$H, run$S.2/run$H)
   maxSH <- max(run$S.1/run$H, run$S.2/run$H)
@@ -681,7 +681,7 @@ Xi <- sim_tol_exclusion[i, "X"]
 env <- init_env(time=time, L=c(Li, Li, 0), N=c(Ni, Ni, 0), X=c(Xi, Xi, 0))
 
 run <- coRal::run_coral(time=time, env=env, pars=pars_tol_exclusion)
-run2 <- coRal::run_coral(time=time, env=env, pars=pars_dominance)
+run2 <- coRal::run_coral(time=time, env=env, pars=pars_competition)
 
 minSH <- min(run$S.1/run$H, run$S.2/run$H)
 maxSH <- max(run$S.1/run$H, run$S.2/run$H)
@@ -721,47 +721,47 @@ print(paste0("Light = ", Li, " mol photons/m^2/day, Nitrogen = ", Ni, " mol/L, F
 
 
 ```{r}
-# How many cases where the sensitive symb. was dominant were in environments where the host could only survive
+# How many cases where the sensitive symb. was the superior competitor were in environments where the host could only survive
 # with the sensitive symbiont?
-sum((sim_dominance$dominant_symb == "Sensitive") &
-	(sim_1symb$survival_1symb == "Sensitive")) / sum(sim_dominance$dominant_symb == "Sensitive")
+sum((sim_competition$sup_competitor == "Sensitive") &
+	(sim_1symb$survival_1symb == "Sensitive")) / sum(sim_competition$sup_competitor == "Sensitive")
 
 # How many of those were where the host could survive with either symbiont?
-sum((sim_dominance$dominant_symb == "Sensitive") &
-	(sim_1symb$survival_1symb == "Either")) / sum(sim_dominance$dominant_symb == "Sensitive")
+sum((sim_competition$sup_competitor == "Sensitive") &
+	(sim_1symb$survival_1symb == "Either")) / sum(sim_competition$sup_competitor == "Sensitive")
 
 # How many were where the host couldn't survive with the sensitive symbiont at all (this would be weird)?
-sum((sim_dominance$dominant_symb == "Sensitive") & ((sim_1symb$survival_1symb == "Tolerant") |
-	(sim_1symb$survival_1symb == "No-survival"))) / sum(sim_dominance$dominant_symb == "Sensitive")
+sum((sim_competition$sup_competitor == "Sensitive") & ((sim_1symb$survival_1symb == "Tolerant") |
+	(sim_1symb$survival_1symb == "No-survival"))) / sum(sim_competition$sup_competitor == "Sensitive")
 
 
 
 
 
-# How many cases where the tolerant symb. was dominant were in environments where the host could only survive
+# How many cases where the tolerant symb. was the superior competitor were in environments where the host could only survive
 # with the tolerant symbiont?
-sum((sim_dominance$dominant_symb == "Tolerant") &
-	(sim_1symb$survival_1symb == "Tolerant")) / sum(sim_dominance$dominant_symb == "Tolerant")
+sum((sim_competition$sup_competitor == "Tolerant") &
+	(sim_1symb$survival_1symb == "Tolerant")) / sum(sim_competition$sup_competitor == "Tolerant")
 
 # How many of those were where the host could survive with either symbiont?
-sum((sim_dominance$dominant_symb == "Tolerant") &
-	(sim_1symb$survival_1symb == "Either")) / sum(sim_dominance$dominant_symb == "Tolerant")
+sum((sim_competition$sup_competitor == "Tolerant") &
+	(sim_1symb$survival_1symb == "Either")) / sum(sim_competition$sup_competitor == "Tolerant")
 
 # How many were there where the host couldn't survive with the tolerant symbiont at all (this would be weird)?
-sum((sim_dominance$dominant_symb == "Tolerant") & ((sim_1symb$survival_1symb == "Sensitive") |
-	(sim_1symb$survival_1symb == "No-survival"))) / sum(sim_dominance$dominant_symb == "Tolerant")
+sum((sim_competition$sup_competitor == "Tolerant") & ((sim_1symb$survival_1symb == "Sensitive") |
+	(sim_1symb$survival_1symb == "No-survival"))) / sum(sim_competition$sup_competitor == "Tolerant")
 
 
 
-## These statistics don't neccesarily line up perfectly with being able to survive with 99% non-dominant symbiont
-# How many sensitive-dominant cases where the host failed to survive with 99% tolerant were in regions
+## These statistics don't neccesarily line up perfectly with being able to survive with 99% of the inferior competitor
+# How many cases where sensitive symb. was the superior competitor and the host failed to survive with 99% tolerant were in regions
 # where the host couldn't survive with the tolerant symbiont alone? (all but literally 1 case)
-sen_1symb <- sim_1symb[sim_dominance$dominant_symb == "Sensitive",]
+sen_1symb <- sim_1symb[sim_competition$sup_competitor == "Sensitive",]
 sum((sen_1symb$survival_1symb == "Sensitive") & !(sim_tol_exclusion$posGrH & sim_tol_exclusion$noClimAll)) / sum(!(sim_tol_exclusion$posGrH & sim_tol_exclusion$noClimAll))
 
-# How many tolerant-dominant cases where the host failed to survive with 99% sensitive were in regions
+# How many cases where the tolerant was the superior competitor and the host failed to survive with 99% sensitive were in regions
 # where the host couldn't survive with the sensitive symbiont alone? (all cases)
-tol_1symb <- sim_1symb[sim_dominance$dominant_symb == "Tolerant",]
+tol_1symb <- sim_1symb[sim_competition$sup_competitor == "Tolerant",]
 sum((tol_1symb$survival_1symb == "Tolerant") & !(sim_sen_exclusion$posGrH & sim_sen_exclusion$noClimAll)) / sum(!(sim_sen_exclusion$posGrH & sim_sen_exclusion$noClimAll))
 
 
