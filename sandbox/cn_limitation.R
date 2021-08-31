@@ -35,7 +35,7 @@ cn_limitation <- function(run, pars) {
 
     ## Host
     # inputs to the host growth SU
-    hostC <- pars$yC * run$rhoC * run$S / run$H + run$jX # carbon input
+    hostC <- pars$yC * run$rhoC * run$S / run$H + run$jX + ifelse(is.null(run$jOC), 0, run$jOC) # carbon input
     hostN <- (run$jN + pars$nNX * run$jX + run$rNH) / pars$nNH # nitrogen input
 
     # Host C/N limitation
@@ -67,7 +67,7 @@ cn_limitation <- function(run, pars) {
     csymbtot <- apply(csymbi, 1, sum)
 
     # carbon input to host growth SU
-    hostC <- pars$yC * csymbtot / run$H + run$jX
+    hostC <- pars$yC * csymbtot / run$H + run$jX + ifelse(is.null(run$jOC), 0, run$jOC)
 
     # nitrogen input to host grwoth SU
     hostN <- (run$jN + pars$nNX * run$jX + run$rNH) / pars$nNH
