@@ -470,17 +470,51 @@ output:
 
   plot(time, run_recovers_S$S/run_recovers_S$H, type="l", col=colSen, lty=2, lwd=2,
   	xlab="Time (days)", ylab="Symbiont:host ratio",
-  	main="Recovery with sensitive symb. alone", ylim=c(0, 1))
+  	main="Recovery with sen. symb. alone\n('Recovers w/ S.')", ylim=c(0, 1))
   lines(time[(run_recovers_S$dH.Hdt > 0) & (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
     (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0) & (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
   	lwd=2, col=colSen)
 
+  # Recovers with T
+  env_recovers_T <- init_env(time=time, L=c(recovers_T_L, recovers_T_L, 0),
+    N=c(recovers_T_N, recovers_T_N, 0), X=c(recovers_T_X, recovers_T_X, 0))
+
+  run_recovers_T <- run_coral_initFluxes(time=time, env=env_recovers_T, pars=pars_tol, initjHG=0, initjCP=0)
+  cnlim_recovers_T <- cn_limitation(run_recovers_T, pars_tol)
+
+  plot(time, run_recovers_T$S/run_recovers_T$H, type="l", col=colTol, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="Recovery with addition of tol. symb\n('Recovers with T.')", ylim=c(0, 1))
+  lines(time[(run_recovers_T$dH.Hdt > 0) & (cnlim_recovers_T$H >= 0) & (cnlim_recovers_T$S >= 0)],
+    (run_recovers_T$S/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0) & (cnlim_recovers_T$H >= 0) & (cnlim_recovers_T$S >= 0)],
+    lwd=3, col=colTol)
+
+  # Recovers with S in presence of T
+  env_recovers_S_ip_T <- init_env(time=time, L=c(recovers_S_ip_T_L, recovers_S_ip_T_L, 0),
+    N=c(recovers_S_ip_T_N, recovers_S_ip_T_N, 0), X=c(recovers_S_ip_T_X, recovers_S_ip_T_X, 0))
+
+  run_recovers_S_ip_T <- run_coral_initFluxes(time=time, env=env_recovers_S_ip_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_S_ip_T <- cn_limitation(run_recovers_S_ip_T, pars_both)
+
+  plot(time, run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H, type="l", col=colSen, lty=2, lwd=2,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="Recovery to sen-dominated state\nwith addition of tol. symb\n('Recovers w/ S in presence of T')", ylim=c(0, 1))
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) &
+    (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colSen)
+
+  lines(time, run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H, type="l", col=colTol, lty=2, lwd=3)
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) &
+    (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colTol)
+
   # Legend
   par(mar=c(0,0,0,0))
   plot.new()
-  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
-  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
-  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  legend("center", c("Sensitive symb. (recovered)", "Sensitive symb. (pre-recovery)", "Tolerant symb. (recovered)", "Tolerant symb. (pre-recovery)"),
+  	col=c(colSen, colSen, colTol, colTol), lwd=c(2, 2, 3, 3), lty=c(1, 2, 1, 2), cex=1.3)
   #dev.off()
 
 ```
