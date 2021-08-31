@@ -97,7 +97,7 @@ results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %d
     print(posGrH)
 
     # Record the result
-    survival[[paste0("tol_", tolAmounts[i])]] <- (posGrH & noClimAll)
+    survival[[paste0("tol_", tolAmounts[i])]] <- (posGrH) #& noClimAll)
   }
 
   # Return the environmental parameters and survival information

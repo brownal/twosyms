@@ -106,7 +106,7 @@ output:
     posGrH_sen_survival <- (run_sen_survival$dH.Hdt[length(survival_time)] > 0)
 
     # Does the host survive & maintain a functional symbiosis with just sensitive symbionts?
-    if(posGrH_sen_survival & noClimAll_sen_survival) {
+    if(posGrH_sen_survival) { #& noClimAll_sen_survival) {
       outcome <- "recovers-S" # recovers with sensitive symbiont
     } else {
       # Does the host survival & maintain a functional symbiosis with sensitive & tolerant symbionts?
@@ -117,7 +117,7 @@ output:
 
       posGrH_both_survival <- (run_both_survival$dH.Hdt[length(survival_time)] > 0)
 
-      if (posGrH_both_survival & noClimAll_both_survival) {
+      if (posGrH_both_survival) { #& noClimAll_both_survival) {
         # What happens after recovery? Which symbiont is more abundant 1000 days after bleaching?
         run_both_pr <- run_coral_initFluxes(time=pr_time, env=env_pr_time, pars=pars_both, initjHG=0, initjCP=c(0, 0))
 
@@ -185,7 +185,7 @@ output:
     posGrH_sen_survival <- (run_sen_survival$dH.Hdt[length(survival_time)] > 0)
 
     # Does the host survive & maintain a functional symbiosis with just sensitive symbionts?
-    if(posGrH_sen_survival & noClimAll_sen_survival) {
+    if(posGrH_sen_survival) { #& noClimAll_sen_survival) {
       outcome <- "recovers-S" # recovers with sensitive symbiont
     } else {
       # Does the host survival & maintain a functional symbiosis with sensitive & tolerant symbionts?
@@ -196,7 +196,7 @@ output:
 
       posGrH_both_survival <- (run_both_survival$dH.Hdt[length(survival_time)] > 0)
 
-      if (posGrH_both_survival & noClimAll_both_survival) {
+      if (posGrH_both_survival) { #& noClimAll_both_survival) {
         # What happens after recovery? Which symbiont is more abundant 1000 days after bleaching?
         run_both_pr <- run_coral_oc_initFluxes(time=pr_time, env=env_pr_time, pars=pars_both, initjHG=0, initjCP=c(0, 0))
 
@@ -471,8 +471,8 @@ output:
   plot(time, run_recovers_S$S/run_recovers_S$H, type="l", col=colSen, lty=2, lwd=2,
   	xlab="Time (days)", ylab="Symbiont:host ratio",
   	main="Recovery with sen. symb. alone\n('Recovers w/ S.')", ylim=c(0, 1))
-  lines(time[(run_recovers_S$dH.Hdt > 0) & (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
-    (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0) & (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+  lines(time[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+    (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
   	lwd=2, col=colSen)
 
   # Recovers with T
@@ -485,8 +485,8 @@ output:
   plot(time, run_recovers_T$S/run_recovers_T$H, type="l", col=colTol, lty=2, lwd=3,
     xlab="Time (days)", ylab="Symbiont:host ratio",
     main="Recovery with addition of tol. symb\n('Recovers with T.')", ylim=c(0, 1))
-  lines(time[(run_recovers_T$dH.Hdt > 0) & (cnlim_recovers_T$H >= 0) & (cnlim_recovers_T$S >= 0)],
-    (run_recovers_T$S/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0) & (cnlim_recovers_T$H >= 0) & (cnlim_recovers_T$S >= 0)],
+  lines(time[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_T$H >= 0) & (cnlim_recovers_T$S >= 0)],
+    (run_recovers_T$S/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_T$H >= 0) & (cnlim_recovers_T$S >= 0)],
     lwd=3, col=colTol)
 
   # Recovers with S in presence of T
@@ -499,15 +499,15 @@ output:
   plot(time, run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H, type="l", col=colSen, lty=2, lwd=2,
     xlab="Time (days)", ylab="Symbiont:host ratio",
     main="Recovery to sen-dominated state\nwith addition of tol. symb\n('Recovers w/ S in presence of T')", ylim=c(0, 1))
-  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
-    (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) &
-    (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
     lwd=2, col=colSen)
 
   lines(time, run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H, type="l", col=colTol, lty=2, lwd=3)
-  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
-    (run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0) & (cnlim_recovers_S_ip_T$H >= 0) &
-    (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
     lwd=3, col=colTol)
 
   # Legend
