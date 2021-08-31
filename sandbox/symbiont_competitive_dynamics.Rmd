@@ -91,20 +91,6 @@ output:
   pars_sen_exclusion$jSGm[1] <- 0.15
   pars_sen_exclusion$initS[1:2] <- c(0.01, 0.99)
 
-
-  # Parameters for determining what happens to hosts with a single symbiont species.
-  # Sensitive symb. parameters
-  pars_sen <- def_pars(nsym=1)
-  pars_sen$initS <- 1
-
-  # Tolerant symb. parameters
-  pars_tol <- def_pars(nsym=1)
-  pars_tol$jCPm <- 1.0
-  pars_tol$kROS <- 250
-  pars_tol$jSGm <- 0.15
-  pars_tol$initS <- 1
-
-
   # Randomly draw the environmental parameters
   env_params <- data.frame("L"=runif(20000, 5, 60), # Light, choose values between 5 and 60 mol photons/m^2/d
                               "N"=runif(20000, 1e-8, 1e-5), # DIN, choose values between 1e-8 and 1e-5 mol/L
@@ -154,7 +140,7 @@ output:
     grS.1 <- run$dS.Sdt.1[length(time)] # Sensitive symb. per capita growth rate
     grS.2 <- run$dS.Sdt.2[length(time)] # Tolerant symb. per capita growth rate
 
-    if(posGrH & noClimAll) {
+    if(posGrH) { #& noClimAll) {
         if(logTS > 0) {
           sup_competitor <- "Tolerant" # There are more tolerant than sensitive symbionts
         } else if(logTS < 0) {
@@ -214,7 +200,7 @@ output:
     } else {
       exclusionTime <- NA
     }
-    print("Got here")
+
     # Check that the host is alive
     cnlim <- cn_limitation(run$fluxes, pars_tol_exclusion) # Calculate carbon/nitrogen limitation
     posGrH <- (run$fluxes$dH.Hdt[length(run$fluxes$dH.Hdt)] > 0) # Is the host growing?
@@ -409,22 +395,22 @@ output:
   layout(matrix(c(1, 2), nrow=2, byrow=TRUE), respect=FALSE)
   ## Light
 
-  plot(sim_tol_exclusion$L[sim_tol_exclusion$reachedThreshold & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d],
-  	sim_tol_exclusion$exclusionTime[sim_tol_exclusion$reachedThreshold  & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d]/365,
+  plot(sim_tol_exclusion$L[sim_tol_exclusion$reachedThreshold & sim_tol_exclusion$posGrH100d], #& sim_tol_exclusion$noClimAll100d],
+  	sim_tol_exclusion$exclusionTime[sim_tol_exclusion$reachedThreshold  & sim_tol_exclusion$posGrH100d]/365, #& sim_tol_exclusion$noClimAll100d]/365,
     xlim=c(5, 60), ylim=c(1/365, 20+1), xlab="Light (mol photons/m^2/day)",
   	ylab="Time to competitive exclusion (years)", col=colTol, pch=pchTol,
   	main="(a) Light")
 
-  points(sim_sen_exclusion$L[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d],
-  	sim_sen_exclusion$exclusionTime[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d]/365,
+  points(sim_sen_exclusion$L[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d], #& sim_sen_exclusion$noClimAll100d],
+  	sim_sen_exclusion$exclusionTime[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d]/365, #& sim_sen_exclusion$noClimAll100d]/365,
   	col=colSen, pch=pchSen)
 
-  points(sim_tol_exclusion$L[!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d],
-  	rep(21, sum(!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d)),
+  points(sim_tol_exclusion$L[!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d], #& sim_tol_exclusion$noClimAll100d],
+  	rep(21, sum(!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d)), #& sim_tol_exclusion$noClimAll100d)),
   	col=colTol, pch=17)
 
-  points(sim_sen_exclusion$L[!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d],
-  	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d)),
+  points(sim_sen_exclusion$L[!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d], #& sim_sen_exclusion$noClimAll100d],
+  	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d)), #& sim_sen_exclusion$noClimAll100d)),
   	col=colSen, pch=2)
 
   legend("topright", c("Exclusion of tol.", "Exclusion of tol. takes > 20 yrs", "Exclusion of sen.", "Exclusion of sen. takes > 20 yrs"),
@@ -433,22 +419,22 @@ output:
 
   ## Nitrogen
 
-  plot(sim_tol_exclusion$N[sim_tol_exclusion$reachedThreshold& sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d],
-  	sim_tol_exclusion$exclusionTime[sim_tol_exclusion$reachedThreshold & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d]/365,
+  plot(sim_tol_exclusion$N[sim_tol_exclusion$reachedThreshold& sim_tol_exclusion$posGrH100d], #& sim_tol_exclusion$noClimAll100d],
+  	sim_tol_exclusion$exclusionTime[sim_tol_exclusion$reachedThreshold & sim_tol_exclusion$posGrH100d]/365, #& sim_tol_exclusion$noClimAll100d]/365,
     xlim=c(1e-8, 1e-5), ylim=c(1/365, 20+1), xlab="Nitrogen (mol/L)", log="x", # Plot on log scale to better what's happening at low N, where the interesting stuff is
   	ylab="Time to competitive exclusion (years)", col=colTol, pch=pchTol,
   	main="(b) Nitrogen")
 
-  points(sim_sen_exclusion$N[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d],
-  	sim_sen_exclusion$exclusionTime[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d]/365,
+  points(sim_sen_exclusion$N[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d], #& sim_sen_exclusion$noClimAll100d],
+  	sim_sen_exclusion$exclusionTime[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d]/365, #& sim_sen_exclusion$noClimAll100d]/365,
   	col=colSen, pch=pchSen)
 
-  points(sim_tol_exclusion$N[!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d],
-  	rep(21, sum(!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d)),
+  points(sim_tol_exclusion$N[!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d], #& sim_tol_exclusion$noClimAll100d],
+  	rep(21, sum(!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d)), #& sim_tol_exclusion$noClimAll100d)),
   	col=colTol, pch=17)
 
-  points(sim_sen_exclusion$N[!(sim_sen_exclusion$reachedThreshold)& sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d],
-  	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d)),
+  points(sim_sen_exclusion$N[!(sim_sen_exclusion$reachedThreshold)& sim_sen_exclusion$posGrH100d], #& sim_sen_exclusion$noClimAll100d],
+  	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d)), #& sim_sen_exclusion$noClimAll100d)),
   	col=colSen, pch=2)
 
   #dev.off()
@@ -462,22 +448,22 @@ output:
 
   layout(matrix(c(1, 2), nrow=2, byrow=TRUE), respect=FALSE, heights=c(0.75, 0.25))
 
-  plot(sim_tol_exclusion$X[sim_tol_exclusion$reachedThreshold& sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d],
-  	sim_tol_exclusion$exclusionTime[sim_tol_exclusion$reachedThreshold & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d]/365,
+  plot(sim_tol_exclusion$X[sim_tol_exclusion$reachedThreshold& sim_tol_exclusion$posGrH100d], #& sim_tol_exclusion$noClimAll100d],
+  	sim_tol_exclusion$exclusionTime[sim_tol_exclusion$reachedThreshold & sim_tol_exclusion$posGrH100d]/365, #& sim_tol_exclusion$noClimAll100d]/365,
   	xlim=c(0, 4e-7), ylim=c(1/365, 20+1), xlab="Prey (mol/L)",
   	ylab="Time (years)", col=colTol, pch=pchTol,
   	main="Prey vs. time to competitive exclusion")
 
-  points(sim_sen_exclusion$X[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d],
-  	sim_sen_exclusion$exclusionTime[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d]/365,
+  points(sim_sen_exclusion$X[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d], #& sim_sen_exclusion$noClimAll100d],
+  	sim_sen_exclusion$exclusionTime[sim_sen_exclusion$reachedThreshold & sim_sen_exclusion$posGrH100d]/365, #& sim_sen_exclusion$noClimAll100d]/365,
   	col=colSen, pch=pchSen)
 
-  points(sim_tol_exclusion$X[!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d],
-  	rep(21, sum(!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d)),
+  points(sim_tol_exclusion$X[!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d], #& sim_tol_exclusion$noClimAll100d],
+  	rep(21, sum(!(sim_tol_exclusion$reachedThreshold) & sim_tol_exclusion$posGrH100d)), #& sim_tol_exclusion$noClimAll100d)),
   	col=colTol, pch=17)
 
-  points(sim_sen_exclusion$X[!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d],
-  	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d)),
+  points(sim_sen_exclusion$X[!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d], #& sim_sen_exclusion$noClimAll100d],
+  	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d)), #& sim_sen_exclusion$noClimAll100d)),
   	col=colSen, pch=2)
 
 
@@ -489,16 +475,13 @@ output:
   	pch=c(pchTol, 17, pchSen, 2), col=c(colTol, colTol, colSen, colSen), pt.bg=c("white", rgb(0, 0, 1, 0.25)))
 
   #dev.off()
-
 ```
 
 
 ```{r summary-statistics, cache=TRUE, dependson=c("run-tolerant-exclusion-sims", "run-sensitive-exclusion-sims")}
+  summary(sim_tol_exclusion[sim_tol_exclusion$posGrH100d,]) #& sim_tol_exclusion$noClimAll100d,])
 
-summary(sim_tol_exclusion[sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimAll100d,])
-
-summary(sim_sen_exclusion[sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimAll100d,])
-
+  summary(sim_sen_exclusion[sim_sen_exclusion$posGrH100d,]) #& sim_sen_exclusion$noClimAll100d,])
 ```
 
 # What do the dynamics of competitive exclusion look like?
