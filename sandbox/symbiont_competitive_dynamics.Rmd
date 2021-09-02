@@ -324,7 +324,7 @@ output:
   outlda <- lda(sup_competitor ~ L + N + X, datalda)
 
   # Plot the data on the linear discriminant axes
-  #pdf("sup_competitor.pdf", 10, 5)
+  pdf("competitive_dominance.pdf", 10, 5)
   layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
 
   plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
@@ -381,7 +381,7 @@ output:
   legend("center", c("Sensitive symb.", "Tolerant symb.", "No survival"),
   	col=c(colSen, colTol, colNS), pch=c(pchSen, pchTol, pchNS),
   	title="Superior competitor", cex=1.3, pt.cex=1.5)
-  #dev.off()
+  dev.off()
 
   # Print the results of the linear discriminant analysis
   outlda
@@ -391,7 +391,7 @@ output:
 # How do environmental variables affect the time to competitive exclusion?
 
 ```{r plot-light-nitrogen-vs-exclusion, cache=TRUE, dependson=c("run-tolerant-exclusion-sims", "run-sensitive-exclusion-sims")}
-  #pdf("Time_to_competitive_exclusion.pdf", 12, 12)
+  pdf("competitive_exclusion.pdf", 12, 12)
   layout(matrix(c(1, 2), nrow=2, byrow=TRUE), respect=FALSE)
   ## Light
 
@@ -437,14 +437,14 @@ output:
   	rep(21, sum(!(sim_sen_exclusion$reachedThreshold) & sim_sen_exclusion$posGrH100d)), #& sim_sen_exclusion$noClimAll100d)),
   	col=colSen, pch=2)
 
-  #dev.off()
+  dev.off()
 ```
 
 
 ```{r plot-food-vs-exclusion, cache=TRUE, dependson=c("run-tolerant-exclusion-sims", "run-sensitive-exclusion-sims")}
   ## Food
 
-  #pdf("Supplement_prey_competitive_exclusion_time.pdf", 6, 6)
+  pdf("competitive_exclusion_prey.pdf", 6, 6)
 
   layout(matrix(c(1, 2), nrow=2, byrow=TRUE), respect=FALSE, heights=c(0.75, 0.25))
 
@@ -474,7 +474,7 @@ output:
   legend("center", c("Exclusion of tol.", "Exclusion of tol. takes > 20 yrs", "Exclusion of sen.", "Exclusion of sen. takes > 20 yrs"),
   	pch=c(pchTol, 17, pchSen, 2), col=c(colTol, colTol, colSen, colSen), pt.bg=c("white", rgb(0, 0, 1, 0.25)))
 
-  #dev.off()
+  dev.off()
 ```
 
 
