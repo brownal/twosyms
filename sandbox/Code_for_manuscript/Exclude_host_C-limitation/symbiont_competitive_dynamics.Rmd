@@ -124,7 +124,7 @@ output:
     grS.1 <- run$dS.Sdt.1[length(time)] # Sensitive symb. per capita growth rate
     grS.2 <- run$dS.Sdt.2[length(time)] # Tolerant symb. per capita growth rate
 
-    if(posGrH) & noClimH) {
+    if(posGrH & noClimH) {
         if(logTS > 0) {
           sup_competitor <- "Tolerant" # There are more tolerant than sensitive symbionts
         } else if(logTS < 0) {
