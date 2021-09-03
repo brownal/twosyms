@@ -463,7 +463,7 @@ output:
 
 
 ```{r summary-statistics, cache=TRUE, dependson=c("run-tolerant-exclusion-sims", "run-sensitive-exclusion-sims")}
-  summary(sim_tol_exclusion[sim_tol_exclusion$posGrH100d, & sim_tol_exclusion$noClimH100d,])
+  summary(sim_tol_exclusion[sim_tol_exclusion$posGrH100d & sim_tol_exclusion$noClimH100d,])
 
   summary(sim_sen_exclusion[sim_sen_exclusion$posGrH100d & sim_sen_exclusion$noClimH100d,])
 ```
