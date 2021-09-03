@@ -3,9 +3,9 @@
 
 (* ::Input:: *)
 (*(*define model*)*)
-(*jX=(jXm X)/(X+KX);*)
-(* jN=(jNm \[CapitalNu])/(\[CapitalNu]+KN);*)
-(*jHT=j0HT;*)
+(*jX=(jXm X)/(X+KX); *)
+(* jN=(jNm \[CapitalNu])/(\[CapitalNu]+KN); *)
+(*jHT=j0HT; *)
 (*rNH=\[Sigma]NH nNH jHT; *)
 (*rNS1=\[Sigma]NS1 nNS1 j0ST1; *)
 (*rNS2=\[Sigma]NS2 nNS2 j0ST2; *)
@@ -43,12 +43,21 @@
 (*(*names of fluxes*)*)
 (*names={jHG->"\!\(\*SubscriptBox[\(j\), \(HG\)]\)",\[Rho]N->"\!\(\*SubscriptBox[\(\[Rho]\), \(N\)]\)",jeC->"\!\(\*SubscriptBox[\(j\), \(eC\)]\)",jCO2->"\!\(\*SubscriptBox[\(j\), SubscriptBox[\(CO\), \(2\)]]\)",jL1->"\!\(\*SubscriptBox[\(j\), \(L1\)]\)",jL2->"\!\(\*SubscriptBox[\(j\), \(L2\)]\)",rCH->"\!\(\*SubscriptBox[\(r\), \(CH\)]\)",rCS1->"\!\(\*SubscriptBox[\(r\), \(CS1\)]\)",*)
 (*rCS2->"\!\(\*SubscriptBox[\(r\), \(CS2\)]\)",jCP1->"\!\(\*SubscriptBox[\(j\), \(CP1\)]\)",jCP2->"\!\(\*SubscriptBox[\(j\), \(CP2\)]\)",jeL1->"\!\(\*SubscriptBox[\(j\), \(eL1\)]\)",jeL2->"\!\(\*SubscriptBox[\(j\), \(eL2\)]\)",jNPQ1->"\!\(\*SubscriptBox[\(j\), \(NPQ1\)]\)", jNPQ2->"\!\(\*SubscriptBox[\(j\), \(NPQ2\)]\)",cROS11->"\!\(\*SubscriptBox[\(c\), \(ROS1\)]\)"(*"Subscript[c, ROS1]-1"*), cROS12->"\!\(\*SubscriptBox[\(c\), \(ROS2\)]\)"(*"Subscript[c, ROS2]-1"*), jSG1->"\!\(\*SubscriptBox[\(j\), \(SG1\)]\)",jSG2->"\!\(\*SubscriptBox[\(j\), \(SG2\)]\)",\[Rho]C1->"\!\(\*SubscriptBox[\(\[Rho]\), \(C1\)]\)",\[Rho]C2->"\!\(\*SubscriptBox[\(\[Rho]\), \(C2\)]\)",jST1->"\!\(\*SubscriptBox[\(j\), \(ST1\)]\)", jST2->"\!\(\*SubscriptBox[\(j\), \(ST2\)]\)"};*)
+(*(*helper functions*)*)
 (*numbers[tsolve_]:=Transpose[{Range@Length@#,#}]&@tsolve[[All,1]];*)
 (*fluxtonumber[tsolve_]:=#[[2]]->#[[1]]&/@numbers[tsolve];*)
 (*getnumbers[tsolve_,fluxes_]:=Select[numbers[tsolve],MemberQ[fluxes,#[[2]]]&][[All,1]];*)
 (*reduce[tsolve_,numbers_]:=Delete[tsolve,{#}&/@numbers];*)
 (*(*get the adjency matrix fromt the fluxes in tsolve*)*)
 (*matrix[tsolve_]:=matrix[tsolve]=Table[Table[FreeQ[row[[2]],x],{row,tsolve}],{x,tsolve[[All,1]]}]/.{True->0,False->1};*)
+
+
+(* ::Input:: *)
+(*(*show the adjacency matrix*)*)
+(*TableForm[matrix[tsolve],TableHeadings->{#,#}&@(tsolve[[All,1]]/.names)]*)
+
+
+(* ::Input:: *)
 (*(*make a graph from the fluxes in tsolve (using the adjency matrix)*)*)
 (*graph[tsolve_,markeds_]:=AdjacencyGraph[matrix[tsolve],VertexStyle->Table[i->\!\(\**)
 (*TagBox[GridBox[{*)
@@ -88,12 +97,6 @@
 
 
 (* ::Input:: *)
-(*TableForm[matrix[tsolve],TableHeadings->{#,#}&@(tsolve[[All,1]]/.names)]*)
-
-
-(* ::Input:: *)
-(*(*graph[tsolve,{jCP,jSG}]*)*)
-(*(*graph[reduce[tsolve,getnumbers[tsolve,{jCP,jSG}]]]*)*)
 (*(*test if graph has no loops*)*)
 (*GoodGraphQ:=AcyclicGraphQ[#]\[And]LoopFreeGraphQ[#]&;*)
 (*(*get all possible flux combinations up to level*)*)
@@ -105,7 +108,7 @@
 
 
 (* ::Input:: *)
-(*(Export["fluxplots-2-symbionts.pdf",#];#)&@Column[Join[{"Cycle-free versions of graph. Yellow: flux-state-variables that interrupt cycles.","Level = number of fluxes to replace with state variables","Do not show redundant solutions (that just add state variables to lower level solutions)"},Table[*)
+(*(*(Export["fluxplots.pdf",#];#)&@*)Column[Join[{"Cycle-free versions of graph. Yellow: flux-state-variables that interrupt cycles.","Level = number of fluxes to replace with state variables","Do not show redundant solutions (that just add state variables to lower level solutions)"},Table[*)
 (*Column[{"--------------",Row[{"Level: ",level}],*)
 (*Column[Table[graph[tsolve,statefluxes],{statefluxes,fluxsolutions[level]}]]}],*)
 (*{level,0,maxlevel}]]]*)
