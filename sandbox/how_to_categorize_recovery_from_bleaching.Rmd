@@ -1,0 +1,2049 @@
+---
+title: "How should we categorize tolerant-assisted recovery from bleaching?"
+author: "A.L. Brown. F. Pfab, E.C. Baxter, A.R. Detmer, H.V. Moeller, R.M. Nisbet, and R. Cunning"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r set-options}
+  # Set kintr options
+  knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+  # Load packages
+  library("coRal")
+  library("foreach")
+  library("parallel")
+  library("doParallel")
+  library("MASS")
+  library("knitr")
+
+  # Plot size for running this in-line
+  options(repr.plot.res=240)
+
+  # Load functions
+  source("synth.R") # synthesizing unit (used in run_coral_competitive exclusion)
+  source("cn_limitation.R") # calculates carbon/nitrogen limitation of host and symbiont growth SUs
+  source("run_coral_competitive_exclusion.R") # run_coral that stops when symbiont 2 has declined to a certain fraction of symbiont 1
+  source("plotting_functions.R") # some custom plotting functions
+  source("run_coral_initFluxes.R") # allows simulation to be initialized with custom values of host growth & photosynthesis fluxes
+  source("run_coral_oc_initFluxes.R") # same as above, but with a constant input of organic carbon to the host
+
+  # Define colors
+  colSen <- "#648FFF"
+  colTol <- "#FFB000"
+  colNS <- "#000000"
+  colEither <- "#00FABE"
+  colRescue <- "#DC267F"
+
+  # Define plotting symbols
+  pchSen <- 1
+  pchTol <- 19
+  pchNS <- 0
+  pchEither <- 3
+  pchRescue <- 15
+```
+
+# Abstract
+
+Ross has raised an important point about our simulations looking at recovery from bleaching.
+We classify post-bleaching outcomes depending on whether the host can recover with the sensitive symbiont alone,
+requires the tolerant symbiont to recover, or cannot recover either way.
+
+We further split the middle category (tolerant symb. required for recovery) into two categories:
+"recovers with tolerant" and "recovers with sensitive in presence of tolerant" ("rescue") based on
+the dominant symbiont post-recovery (tolerant and sensitive, respectively).
+
+At the moment, we determine which symbiont is dominant at 1000 days post-bleaching.
+We originally did this because we assumed most cases of tolerant-assisted recovery would end up
+dominated by the tolerant symbiont. To be conservative in identifying cases of rescue, we gave the tolerant
+symbiont a long time to outcompete the sensitive.
+
+Now our thinking has changed, and it's not clear whether looking at 1000 days is a reasonable choice.
+Checking which symbiont is numerically dominant immediately post-bleaching may be more in line with our definition
+of "recovers with sensitive in presence of tolerant," since we would be actually looking at what symbiont
+the coral is dominated by at the point of recovery.
+
+However, classifying simulations using the dominant symbiont at the point of recovery from bleaching also
+leads to us observing significantly more cases of "recovery with sensitive in presence of tolerant."
+It turns out to be pretty common for hosts to initially be sensitive-dominated post-recovery and then become
+tolerant-dominated over time.
+
+This could potentially affect our biological interpretation of "rescue," so I wanted to get your opinions on it.
+Below I've investigated 3 possible time points for determining the outcome of recovery:
+  * At the point of recovery to positive growth (or positive growth + host is not carbon limited for figure S9)
+  * 1000 days post-bleaching (what we currently use in the paper)
+  * 10 years post-bleaching (to match our method for determining competitive dominance in healthy hosts; turns out to be pretty similar to 1000 days post-bleaching)
+
+## Questions
+
+  1. At what time point should we look to determine whether "rescue" (recovery with sen. in presence of tol.) has occurred?
+   - To me, looking at 1000 days or 10 years would be most interesting, because there the tolerant is producing transient dynamics that "rescue" the sensitive long-term. (Looking short term gives us many cases where the tolerant ultimately becomes numerically dominant and so maybe isn't exactly "rescuing" the sensitive symbiont.)
+   - Looking immediately post-recovery tells what is the dominant symbiont that the coral actually "recovers with." This may be more relevant to our definition of "recovers with sensitive in presence of tolerant" and more interesting empirically, where the longer-term dynamics will not always have a chance to play out.
+  2. Would we be okay with leaving an imperfect classification method in to get this submitted sooner?
+
+# Simulate bleached hosts
+
+```{r set-pars, cache=TRUE}
+  #### Set parameters ####
+
+  # Parameters for host with just sensitive symbionts
+  pars_sen <- def_pars()
+  pars_sen$initS <- 1e-4
+
+  # Parameters for hosts with sensitive and tolerant symbionts
+  pars_both <- def_pars(nsym=2)
+  pars_both$jCPm[2] <- 1.0
+  pars_both$kROS[2] <- 250
+  pars_both$jSGm[2] <- 0.15
+  pars_both$initS[1:2] <- c(0.5, 0.5)*1e-4
+
+  # Randomly draw the environmental parameters
+  env_params <- data.frame("L"=runif(150000, 5, 60), # Light, choose values between 5 and 60 mol photons/m^2/d
+    "N"=runif(150000, 1e-8, 1e-5), # DIN, choose values between 1e-8 and 1e-5 mol/L
+    "X" = runif(150000, 0, 4e-7)) # Prey, choose values between 0 and 4e-7 mol/L
+
+  # run simulations for 100 days to determine survival
+  survival_time <-seq(0, 100, 0.1)
+```
+
+```{r sim-recovery, cache=TRUE, dependson=c("set-pars")}
+  #### Simulate host recovery from bleaching ####
+
+  # Set up to run simulations in parallel
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  # results will temporarily hold the summary statistics from the simulations
+  results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # recovery_outcome will be a categorical variable that describes the host's ability to recover from
+    # bleaching with sensitive or sensitive + tolerant symbionts, and what happens afterward
+    outcome <- NA
+
+    # Set up the environmental conditions
+    env_survival_time <- coRal::init_env(time=survival_time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    # Simulate corals for 100 days post-bleaching to see if they recover
+    run_sen_survival <- run_coral_initFluxes(time=survival_time, env=env_survival_time, pars=pars_sen, initjHG=0, initjCP=0)
+
+    # Calculate C-N limitation
+    cnlim_sen_survival <- cn_limitation(run_sen_survival, pars_sen)
+    noClimH_sen_survival <- (cnlim_sen_survival$H[length(survival_time)] >= 0)
+
+    # Calculate host growth rate
+    posGrH_sen_survival <- (run_sen_survival$dH.Hdt[length(survival_time)] > 0)
+
+    # Does the host survive with just sensitive symbionts?
+    if(posGrH_sen_survival) { #& noClimAll_sen_survival) {
+      outcome <- "Recovers-S" # recovers with sensitive symbiont
+    } else {
+      # Does the host survival & maintain a functional symbiosis with sensitive & tolerant symbionts?
+      run_both_survival <- run_coral_initFluxes(time=survival_time, env=env_survival_time, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+      # Calculate C-N limitation
+      cnlim_both_survival <- cn_limitation(run_both_survival, pars_both)
+      cnlimH_both_survival <- (cnlim_both_survival$H[length(survival_time)] >= 0)
+
+      # Calculate host growth rate
+      posGrH_both_survival <- (run_both_survival$dH.Hdt[length(survival_time)] > 0)
+
+      if (posGrH_both_survival) { #& noClimH_both_survival) {
+        # Addition of the tolerant symbiont enables host survival
+        # We'll categorize these simulations further later
+        outcome <- "Recovers-T-assisted"
+      } else {
+        # Neither sensitive symbiont alone nor sensitive + tolerant symbiont enabled recovery from bleaching
+        outcome <- "No-survival"
+      }
+    }
+
+    # Return the environmental parameters and recovery information
+    list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+      "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe, set column types
+  sim_recovery <- data.frame(results, row.names=NULL)
+  sim_recovery <- transform(sim_recovery, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+    outcome=factor(outcome, levels=c("Recovers-S", "Recovers-T-assisted", "No-survival")))
+```
+
+```{r sim-recovery-doc, cache=TRUE, dependson=c("set-pars")}
+  #### Simulate host recovery from bleaching when environment has dissolved organic carbon ####
+
+  # Set up to run simulations in parallel
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  # results will temporarily hold the summary statistics from the simulations
+  results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # recovery_outcome will be a categorical variable that describes the host's ability to recover from
+    # bleaching with sensitive or sensitive + tolerant symbionts, and what happens afterward
+    outcome <- NA
+
+    # Set up the environmental conditions
+    env_survival_time <- coRal::init_env(time=survival_time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    # Simulate corals for 100 days post-bleaching to see if they recover
+    run_sen_survival <- run_coral_oc_initFluxes(time=survival_time, env=env_survival_time, pars=pars_sen, initjHG=0, initjCP=0)
+
+    # Calculate C-N limitation
+    cnlim_sen_survival <- cn_limitation(run_sen_survival, pars_sen)
+    noClimH_sen_survival <- (cnlim_sen_survival$H[length(survival_time)] >= 0)
+
+    # Calculate host growth rate
+    posGrH_sen_survival <- (run_sen_survival$dH.Hdt[length(survival_time)] > 0)
+
+    # Does the host survive with just sensitive symbionts?
+    if(posGrH_sen_survival) { #& noClimAll_sen_survival) {
+      outcome <- "Recovers-S" # recovers with sensitive symbiont
+
+    } else {
+      # Does the host survive with sensitive & tolerant symbionts?
+      run_both_survival <- run_coral_oc_initFluxes(time=survival_time, env=env_survival_time, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+      # Calculate C-N limitation
+      cnlim_both_survival <- cn_limitation(run_both_survival, pars_both)
+      cnlimH_both_survival <- (cnlim_both_survival$H[length(survival_time)] >= 0)
+
+      # Calculate host growth rate
+      posGrH_both_survival <- (run_both_survival$dH.Hdt[length(survival_time)] > 0)
+
+      if (posGrH_both_survival) { #& noClimH_both_survival) {
+        # Addition of the tolerant symbiont enables host survival
+        # We'll categorize these simulations further later
+        outcome <- "Recovers-T-assisted"
+      } else {
+        # Neither sensitive symbiont alone nor sensitive + tolerant symbiont enabled recovery from bleaching
+        outcome <- "No-survival"
+      }
+    }
+
+    # Return the environmental parameters and recovery information
+    list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+      "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe, set column types
+  sim_recovery_doc <- data.frame(results, row.names=NULL)
+  sim_recovery_doc <- transform(sim_recovery_doc, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+    outcome=factor(outcome, levels=c("Recovers-S", "Recovers-T-assisted", "No-survival")))
+```
+
+```{r sim-recovery-noClimH, cache=TRUE, dependson=c("set-pars")}
+  #### Simulate host recovery from bleaching (host must leave C-limitation to count as "recovered") ####
+
+  # Set up to run simulations in parallel
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  # results will temporarily hold the summary statistics from the simulations
+  results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # recovery_outcome will be a categorical variable that describes the host's ability to recover from
+    # bleaching with sensitive or sensitive + tolerant symbionts, and what happens afterward
+    outcome <- NA
+
+    # Set up the environmental conditions
+    env_survival_time <- coRal::init_env(time=survival_time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    # Simulate corals for 100 days post-bleaching to see if they recover
+    run_sen_survival <- run_coral_initFluxes(time=survival_time, env=env_survival_time, pars=pars_sen, initjHG=0, initjCP=0)
+
+    # Calculate C-N limitation
+    cnlim_sen_survival <- cn_limitation(run_sen_survival, pars_sen)
+    noClimH_sen_survival <- (cnlim_sen_survival$H[length(survival_time)] >= 0)
+
+    # Calculate host growth rate
+    posGrH_sen_survival <- (run_sen_survival$dH.Hdt[length(survival_time)] > 0)
+
+    # Does the host survive with just sensitive symbionts?
+    if(posGrH_sen_survival & noClimH_sen_survival) {
+      outcome <- "Recovers-S" # recovers with sensitive symbiont
+    } else {
+      # Does the host survival & maintain a functional symbiosis with sensitive & tolerant symbionts?
+      run_both_survival <- run_coral_initFluxes(time=survival_time, env=env_survival_time, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+      # Calculate C-N limitation
+      cnlim_both_survival <- cn_limitation(run_both_survival, pars_both)
+      noClimH_both_survival <- (cnlim_both_survival$H[length(survival_time)] >= 0)
+
+      # Calculate host growth rate
+      posGrH_both_survival <- (run_both_survival$dH.Hdt[length(survival_time)] > 0)
+
+      if (posGrH_both_survival & noClimH_both_survival) {
+        # Addition of the tolerant symbiont enables host survival
+        # We'll categorize these simulations further later
+        outcome <- "Recovers-T-assisted"
+      } else {
+        # Neither sensitive symbiont alone nor sensitive + tolerant symbiont enabled recovery from bleaching
+        outcome <- "No-survival"
+      }
+    }
+
+    # Return the environmental parameters and recovery information
+    list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+      "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe, set column types
+  sim_recovery_noClimH <- data.frame(results, row.names=NULL)
+  sim_recovery_noClimH <- transform(sim_recovery_noClimH, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+    outcome=factor(outcome, levels=c("Recovers-S", "Recovers-T-assisted", "No-survival")))
+```
+
+#  Categorize the tolerant-assisted outcomes
+
+## Categorize using sensitive:tolerant ratio at moment of recovery
+```{r categorize-moment-of-recovery, cache=TRUE, dependson=c("sim-recovery")}
+  ######## Check which symbiont is numerically dominant at the moment of recovery from bleaching #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+  #for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    time <- seq(0, 100, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+    time_posGrH <- min(time[run_both$dH.Hdt > 0]) # If initjG is not 0, may have to worry about "catching" the initialization with this
+
+    # Sensitive:tolerant ratio at the time of return to positive growth
+    logST <- log(run_both$S.1[time == time_posGrH]) - log(run_both$S.2[time == time_posGrH])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsMomentRecovery <- data.frame(results, row.names=NULL)
+  resultsMomentRecovery <- transform(resultsMomentRecovery, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+    "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsMomentRecovery) <- resultsMomentRecovery$sim
+
+  # Go through the simulations and classify the outcomes
+  outcomeMomentRecovery <- factor(sim_recovery$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stMomentRecovery <- rep(NA, nrow(sim_recovery))
+
+  for(i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    outcomeMomentRecovery[i] <- resultsMomentRecovery[[toString(i), "outcome"]]
+    stMomentRecovery[i] <- resultsMomentRecovery[[toString(i), "logST"]]
+  }
+
+  sim_recovery$outcomeMomentRecovery <- outcomeMomentRecovery
+  sim_recovery$stMomentRecovery <- stMomentRecovery
+```
+
+```{r categorize-moment-of-recovery-doc, cache=TRUE, dependson=c("sim-recovery-doc")}
+  ######## Check which symbiont is numerically dominant at the moment of recovery from bleaching (DOC present in environment) #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery_doc))[sim_recovery_doc$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+
+    time <- seq(0, 100, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_oc_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+    time_posGrH <- min(time[run_both$dH.Hdt > 0]) # If initjG is not 0, may have to worry about "catching" the initialization with this
+
+    # Sensitive:tolerant ratio at the time of return to positive growth
+    logST <- log(run_both$S.1[time == time_posGrH]) - log(run_both$S.2[time == time_posGrH])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsMomentRecovery <- data.frame(results, row.names=NULL)
+  resultsMomentRecovery <- transform(resultsMomentRecovery, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+    "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsMomentRecovery) <- resultsMomentRecovery$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeMomentRecovery <- factor(sim_recovery_doc$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stMomentRecovery <- rep(NA, nrow(sim_recovery_doc))
+
+  for(i in (1:nrow(sim_recovery_doc))[sim_recovery_doc$outcome == "Recovers-T-assisted"]) {
+    outcomeMomentRecovery[i] <- resultsMomentRecovery[[toString(i), "outcome"]]
+    stMomentRecovery[i] <- as.numeric(resultsMomentRecovery[[toString(i), "logST"]])
+  }
+
+  sim_recovery_doc$outcomeMomentRecovery <- outcomeMomentRecovery
+  sim_recovery_doc$stMomentRecovery <- stMomentRecovery
+```
+
+```{r categorize-moment-of-recovery-noClimH, cache=TRUE, dependson=c("sim-recovery-noClimH")}
+  ######## Check which symbiont is numerically dominant at the moment of recovery from bleaching (positive growth + host not C-limited) #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery_noClimH))[sim_recovery_noClimH$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+    time <- seq(0, 100, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+    cnlim <- cn_limitation(run_both, pars_both)
+    time_recovery <- min(time[(run_both$dH.Hdt > 0) & (cnlim$H >= 0)]) # If initjG is not 0, may have to worry about "catching" the initialization with this
+
+    # Sensitive:tolerant ratio at the time of recovery
+    logST <- log(run_both$S.1[time == time_recovery]) - log(run_both$S.2[time == time_recovery])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsMomentRecovery <- data.frame(results, row.names=NULL)
+  resultsMomentRecovery <- transform(resultsMomentRecovery, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+    "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsMomentRecovery) <- resultsMomentRecovery$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeMomentRecovery <- factor(sim_recovery_noClimH$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stMomentRecovery <- rep(NA, nrow(sim_recovery_noClimH))
+
+  for(i in (1:nrow(sim_recovery_noClimH))[sim_recovery_noClimH$outcome == "Recovers-T-assisted"]) {
+    outcomeMomentRecovery[i] <- resultsMomentRecovery[[toString(i), "outcome"]]
+    stMomentRecovery[i] <- as.numeric(resultsMomentRecovery[[toString(i), "logST"]])
+  }
+
+  sim_recovery_noClimH$outcomeMomentRecovery <- outcomeMomentRecovery
+  sim_recovery_noClimH$stMomentRecovery <- stMomentRecovery
+```
+
+## Categorize using sensitive:tolerant ratio after 1000 days
+```{r categorize-day1000, cache=TRUE, dependson=c("sim-recovery")}
+  ######## Check which symbiont is numerically dominant 1000 days post-bleaching #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+  #for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    time <- seq(0, 1000, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsDay1000 <- data.frame(results, row.names=NULL)
+  resultsDay1000 <- transform(resultsDay1000, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsDay1000) <- resultsDay1000$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeDay1000 <- factor(sim_recovery$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stDay1000 <- rep(NA, nrow(sim_recovery))
+
+  for(i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    outcomeDay1000[i] <- resultsDay1000[[toString(i), "outcome"]]
+    stDay1000[i] <- as.numeric(resultsDay1000[[toString(i), "logST"]])
+  }
+
+  sim_recovery$outcomeDay1000 <- outcomeDay1000
+  sim_recovery$stDay1000 <- stDay1000
+```
+
+```{r categorize-day1000-doc, cache=TRUE, dependson=c("sim-recovery-doc")}
+  ######## Check which symbiont is numerically dominant 1000 days post-bleaching (DOC present in environment) #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery_doc))[sim_recovery_doc$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+    time <- seq(0, 1000, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_oc_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  resultsDay1000 <- data.frame(results, row.names=NULL)
+  resultsDay1000 <- transform(resultsDay1000, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsDay1000) <- resultsDay1000$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeDay1000 <- factor(sim_recovery_doc$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stDay1000 <- rep(NA, nrow(sim_recovery_doc))
+
+  for(i in (1:nrow(sim_recovery_doc))[sim_recovery_doc$outcome == "Recovers-T-assisted"]) {
+    outcomeDay1000[i] <- resultsDay1000[[toString(i), "outcome"]]
+    stDay1000[i] <- as.numeric(resultsDay1000[[toString(i), "logST"]])
+  }
+
+  sim_recovery_doc$outcomeDay1000 <- outcomeDay1000
+  sim_recovery_doc$stDay1000 <- stDay1000
+```
+
+```{r categorize-day1000-noClimH, cache=TRUE, dependson=c("sim-recovery-noClimH")}
+  ######## Check which symbiont is numerically dominant 1000 days post-bleaching (recovery requires no host C-limitation) #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery_noClimH))[sim_recovery_noClimH$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+    time <- seq(0, 1000, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsDay1000 <- data.frame(results, row.names=NULL)
+  resultsDay1000 <- transform(resultsDay1000, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsDay1000) <- resultsDay1000$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeDay1000 <- factor(sim_recovery_noClimH$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stDay1000 <- rep(NA, nrow(sim_recovery_noClimH))
+
+  for(i in (1:nrow(sim_recovery_noClimH))[sim_recovery_noClimH$outcome == "Recovers-T-assisted"]) {
+    outcomeDay1000[i] <- resultsDay1000[[toString(i), "outcome"]]
+    stDay1000[i] <- as.numeric(resultsDay1000[[toString(i), "logST"]])
+  }
+
+  sim_recovery_noClimH$outcomeDay1000 <- outcomeDay1000
+  sim_recovery_noClimH$stDay1000 <- stDay1000
+```
+
+## Categorize using sensitive:tolerant ratio after 10 years
+```{r categorize-year10, cache=TRUE, dependson=c("sim-recovery")}
+  ######## Check which symbiont is numerically dominant 10 years post-bleaching #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+  #for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    time <- seq(0, 10*365, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsYear10 <- data.frame(results, row.names=NULL)
+  resultsYear10 <- transform(resultsYear10, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsYear10) <- resultsYear10$sim
+
+  # Go through the simulations and classify the outcomes
+  outcomeYear10 <- factor(sim_recovery$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stYear10 <- rep(NA, nrow(sim_recovery))
+
+  for(i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    outcomeYear10[i] <- resultsYear10[[toString(i), "outcome"]]
+    stYear10[i] <- as.numeric(resultsYear10[[toString(i), "logST"]])
+  }
+
+  sim_recovery$outcomeYear10 <- outcomeYear10
+  sim_recovery$stYear10 <- stYear10
+```
+
+```{r categorize-year10-doc, cache=TRUE, dependson=c("sim-recovery-doc")}
+  ######## Check which symbiont is numerically dominant 10 years post-bleaching (DOC present in environment) #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery_doc))[sim_recovery_doc$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+    time <- seq(0, 10*365, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_oc_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsYear10 <- data.frame(results, row.names=NULL)
+  resultsYear10 <- transform(resultsYear10, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsYear10) <- resultsYear10$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeYear10 <- factor(sim_recovery_doc$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stYear10 <- rep(NA, nrow(sim_recovery_doc))
+
+  for(i in (1:nrow(sim_recovery_doc))[sim_recovery_doc$outcome == "Recovers-T-assisted"]) {
+    outcomeYear10[i] <- resultsYear10[[toString(i), "outcome"]]
+    stYear10[i] <- as.numeric(resultsYear10[[toString(i), "logST"]])
+  }
+
+  sim_recovery_doc$outcomeYear10 <- outcomeYear10
+  sim_recovery_doc$stYear10 <- stYear10
+```
+
+```{r categorize-year10-noClimH, cache=TRUE, dependson=c("sim-recovery-noClimH")}
+  ######## Check which symbiont is numerically dominant 10 years post-bleaching (recovery requires no host C-limitation) #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery_noClimH))[sim_recovery_noClimH$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+    time <- seq(0, 1000, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsYear10 <- data.frame(results, row.names=NULL)
+  resultsYear10 <- transform(resultsYear10, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsYear10) <- resultsYear10$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeYear10 <- factor(sim_recovery_noClimH$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stYear10 <- rep(NA, nrow(sim_recovery_noClimH))
+
+  for(i in (1:nrow(sim_recovery_noClimH))[sim_recovery_noClimH$outcome == "Recovers-T-assisted"]) {
+    outcomeYear10[i] <- resultsYear10[[toString(i), "outcome"]]
+    stYear10[i] <- as.numeric(resultsYear10[[toString(i), "logST"]])
+  }
+
+  sim_recovery_noClimH$outcomeYear10 <- outcomeYear10
+  sim_recovery_noClimH$stYear10 <- stYear10
+```
+
+
+# How do the different classifications compare?
+
+* The most common thing to happen is being sensitive-dominated immediately post-recovery, followed by tolerant-dominated later (see below).
+  - I think this why we originally stopped looking at the dominant symbiont immediately post-recovery.
+    (We thought nearly all hosts that required the tolerant symbiont for recovery would end up tolerant-dominated, and we were specifically interested in those that didn't.)
+* We can also see that hosts that start from a sensitive-dominated state either stay that way, become tolerant-dominated,
+  or temporarily become tolerant-dominated and then revert to a sensitive-dominated state.
+* This suggests that "rescue" is complex and probably includes multiple kinds of transient dynamics.
+
+Dominant symbiont: immediately post-recovery -> 1000 days post-bleaching -> 10 years post-bleaching
+```{r compare-classifications, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery", "categorize-day1000", "categorize-year10")}
+  mymat <- matrix(NA, nrow=sum(sim_recovery$outcome=="Recovers-T-assisted"), ncol=3)
+  mymat[,1] <- (sim_recovery[sim_recovery$outcome=="Recovers-T-assisted",]$outcomeMomentRecovery == "Recovers-S-ip-T")
+  mymat[,2] <- (sim_recovery[sim_recovery$outcome=="Recovers-T-assisted",]$outcomeDay1000 == "Recovers-S-ip-T")
+  mymat[,3] <- (sim_recovery[sim_recovery$outcome=="Recovers-T-assisted",]$outcomeYear10 == "Recovers-S-ip-T")
+
+  # Gets all combinations that occur
+  # Missing are false -> true -> false, false -> true -> true: If you start T-dominated,
+  # you either stay that way or it takes you a really long time to not be that way
+  # All true combinations are present: if you start S-dominated, you can remain that way, become T-dominated, and even revert after being T-dominated
+  # Rescue is complex and probably include multiples kinds of transient dynamics!
+  combos <- unique(mymat)
+
+  for (i in 1:nrow(combos)) {
+    print(paste(c("Tol", "Sen")[combos[i,]+1], collapse=" -> "))
+    print(paste0(round(sum((mymat[,1] == combos[i,1]) & (mymat[,2] == combos[i,2]) &
+  	(mymat[,3] == combos[i,3]))/nrow(mymat) * 100, 1), "% of cases"))
+  }
+```
+
+# What do the figures look like for each classification?
+
+## Figure 1b-d: Example plots for each outcome
+
+### Moment of recovery
+```{r fig1-moment-of-recovery, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery"), fig.width=15, fig.height=7.5}
+  recovers_S_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeMomentRecovery == "Recovers-S"][4]
+  recovers_T_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeMomentRecovery == "Recovers-T"][7]
+  recovers_S_ip_T_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T"][2]
+
+  recovers_S_L <- sim_recovery$L[recovers_S_ex]
+  recovers_S_N <- sim_recovery$N[recovers_S_ex]
+  recovers_S_X <- sim_recovery$X[recovers_S_ex]
+
+  recovers_T_L <- sim_recovery$L[recovers_T_ex]
+  recovers_T_N <- sim_recovery$N[recovers_T_ex]
+  recovers_T_X <- sim_recovery$X[recovers_T_ex]
+
+  recovers_S_ip_T_L <- sim_recovery$L[recovers_S_ip_T_ex]
+  recovers_S_ip_T_N <- sim_recovery$N[recovers_S_ip_T_ex]
+  recovers_S_ip_T_X <- sim_recovery$X[recovers_S_ip_T_ex]
+
+  # pdf("example_outcomes.pdf", 15, 7.5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+  par(cex=1.15)
+  # Leaving this space empty for part (a) of the figure, a diagram
+  plot.new()
+  title("(a) Post-bleaching outcomes")
+
+  # Example simulations
+  # Run for 200 days
+  time <- seq(0, 150, 0.1)
+
+  # Recovers with S
+  env_recovers_S <- init_env(time=time, L=c(recovers_S_L, recovers_S_L, 0),
+    N=c(recovers_S_N, recovers_S_N, 0), X=c(recovers_S_X, recovers_S_X, 0))
+
+  run_recovers_S <- run_coral_initFluxes(time=time, env=env_recovers_S, pars=pars_sen, initjHG=0, initjCP=0)
+  cnlim_recovers_S <- cn_limitation(run_recovers_S, pars_sen)
+
+  plot(time, run_recovers_S$S/run_recovers_S$H, type="l", col=colSen, lty=2, lwd=3,
+  	xlab="Time (days)", ylab="Symbiont:host ratio",
+  	main="(b) Recovery with sen.", ylim=c(0, 0.45))
+  lines(time[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+    (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+  	lwd=3, col=colSen)
+
+  # Recovers with T
+  env_recovers_T <- init_env(time=time, L=c(recovers_T_L, recovers_T_L, 0),
+    N=c(recovers_T_N, recovers_T_N, 0), X=c(recovers_T_X, recovers_T_X, 0))
+
+  run_recovers_T <- run_coral_initFluxes(time=time, env=env_recovers_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_T <- cn_limitation(run_recovers_T, pars_both)
+
+  plot(time, run_recovers_T$S.1/run_recovers_T$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="(c) Recovery w/ tol.", ylim=c(0, 0.3))
+  lines(time[(run_recovers_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_T$S.1/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colSen)
+
+  lines(time, run_recovers_T$S.2/run_recovers_T$H, type="l", col=colTol, lty=2, lwd=2)
+  lines(time[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_T$S.2/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colTol)
+
+  # Recovers with S in presence of T
+  env_recovers_S_ip_T <- init_env(time=time, L=c(recovers_S_ip_T_L, recovers_S_ip_T_L, 0),
+    N=c(recovers_S_ip_T_N, recovers_S_ip_T_N, 0), X=c(recovers_S_ip_T_X, recovers_S_ip_T_X, 0))
+
+  run_recovers_S_ip_T <- run_coral_initFluxes(time=time, env=env_recovers_S_ip_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_S_ip_T <- cn_limitation(run_recovers_S_ip_T, pars_both)
+
+  plot(time, run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="(d) Recovery w/ sen.\nin presence of tol.", ylim=c(0, 0.3))
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colSen)
+
+  lines(time, run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H, type="l", col=colTol, lty=2, lwd=2)
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colTol)
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Sen. symb. (recovered)", "Sen. symb. (pre-recovery)", "Tol. symb. (recovered)", "Tol. symb. (pre-recovery)"),
+  	col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+  # dev.off()
+```
+
+### 1000 days post-bleaching
+```{r fig1-day1000, cache=TRUE, dependson=c("sim-recovery", "categorize-day1000"), fig.width=15, fig.height=7.5}
+  recovers_S_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeDay1000 == "Recovers-S"][4]
+  recovers_T_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeDay1000 == "Recovers-T"][6]
+  recovers_S_ip_T_ex <- min((1:nrow(sim_recovery))[sim_recovery$outcomeDay1000 == "Recovers-S-ip-T"])
+
+  recovers_S_L <- sim_recovery$L[recovers_S_ex]
+  recovers_S_N <- sim_recovery$N[recovers_S_ex]
+  recovers_S_X <- sim_recovery$X[recovers_S_ex]
+
+  recovers_T_L <- sim_recovery$L[recovers_T_ex]
+  recovers_T_N <- sim_recovery$N[recovers_T_ex]
+  recovers_T_X <- sim_recovery$X[recovers_T_ex]
+
+  recovers_S_ip_T_L <- sim_recovery$L[recovers_S_ip_T_ex]
+  recovers_S_ip_T_N <- sim_recovery$N[recovers_S_ip_T_ex]
+  recovers_S_ip_T_X <- sim_recovery$X[recovers_S_ip_T_ex]
+
+  # pdf("example_outcomes.pdf", 15, 7.5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+  par(cex=1.15)
+  # Leaving this space empty for part (a) of the figure, a diagram
+  plot.new()
+  title("(a) Post-bleaching outcomes")
+
+  # Example simulations
+  # Run for 1000 days
+  time <- seq(0, 1000, 0.1)
+
+  # Recovers with S
+  env_recovers_S <- init_env(time=time, L=c(recovers_S_L, recovers_S_L, 0),
+    N=c(recovers_S_N, recovers_S_N, 0), X=c(recovers_S_X, recovers_S_X, 0))
+
+  run_recovers_S <- run_coral_initFluxes(time=time, env=env_recovers_S, pars=pars_sen, initjHG=0, initjCP=0)
+  cnlim_recovers_S <- cn_limitation(run_recovers_S, pars_sen)
+
+  plot(time, run_recovers_S$S/run_recovers_S$H, type="l", col=colSen, lty=2, lwd=3,
+  	xlab="Time (days)", ylab="Symbiont:host ratio",
+  	main="(b) Recovery with sen.", ylim=c(0, 0.3))
+  lines(time[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+    (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+  	lwd=3, col=colSen)
+
+  # Recovers with T
+  env_recovers_T <- init_env(time=time, L=c(recovers_T_L, recovers_T_L, 0),
+    N=c(recovers_T_N, recovers_T_N, 0), X=c(recovers_T_X, recovers_T_X, 0))
+
+  run_recovers_T <- run_coral_initFluxes(time=time, env=env_recovers_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_T <- cn_limitation(run_recovers_T, pars_both)
+
+  plot(time, run_recovers_T$S.1/run_recovers_T$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="(c) Recovery w/ tol.", ylim=c(0, 0.45))
+  lines(time[(run_recovers_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_T$S.1/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colSen)
+
+  lines(time, run_recovers_T$S.2/run_recovers_T$H, type="l", col=colTol, lty=2, lwd=2)
+  lines(time[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_T$S.2/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colTol)
+
+  # Recovers with S in presence of T
+  env_recovers_S_ip_T <- init_env(time=time, L=c(recovers_S_ip_T_L, recovers_S_ip_T_L, 0),
+    N=c(recovers_S_ip_T_N, recovers_S_ip_T_N, 0), X=c(recovers_S_ip_T_X, recovers_S_ip_T_X, 0))
+
+  run_recovers_S_ip_T <- run_coral_initFluxes(time=time, env=env_recovers_S_ip_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_S_ip_T <- cn_limitation(run_recovers_S_ip_T, pars_both)
+
+  plot(time, run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="(d) Recovery w/ sen.\nin presence of tol.", ylim=c(0, 0.3))
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colSen)
+
+  lines(time, run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H, type="l", col=colTol, lty=2, lwd=2)
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colTol)
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Sen. symb. (recovered)", "Sen. symb. (pre-recovery)", "Tol. symb. (recovered)", "Tol. symb. (pre-recovery)"),
+  	col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+  # dev.off()
+```
+
+### 10 years post-bleaching
+```{r fig1-year10, cache=TRUE, dependson=c("sim-recovery", "categorize-year10"), fig.width=15, fig.height=7.5}
+  recovers_S_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeYear10 == "Recovers-S"][4]
+  recovers_T_ex <- (1:nrow(sim_recovery))[sim_recovery$outcomeYear10 == "Recovers-T"][6]
+  recovers_S_ip_T_ex <- min((1:nrow(sim_recovery))[sim_recovery$outcomeYear10 == "Recovers-S-ip-T"])
+
+  recovers_S_L <- sim_recovery$L[recovers_S_ex]
+  recovers_S_N <- sim_recovery$N[recovers_S_ex]
+  recovers_S_X <- sim_recovery$X[recovers_S_ex]
+
+  recovers_T_L <- sim_recovery$L[recovers_T_ex]
+  recovers_T_N <- sim_recovery$N[recovers_T_ex]
+  recovers_T_X <- sim_recovery$X[recovers_T_ex]
+
+  recovers_S_ip_T_L <- sim_recovery$L[recovers_S_ip_T_ex]
+  recovers_S_ip_T_N <- sim_recovery$N[recovers_S_ip_T_ex]
+  recovers_S_ip_T_X <- sim_recovery$X[recovers_S_ip_T_ex]
+
+  # pdf("example_outcomes.pdf", 15, 7.5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+  par(cex=1.15)
+  # Leaving this space empty for part (a) of the figure, a diagram
+  plot.new()
+  title("(a) Post-bleaching outcomes")
+
+  # Example simulations
+  # Run for 10 years
+  time <- seq(0, 10*365, 0.1)
+
+  # Recovers with S
+  env_recovers_S <- init_env(time=time, L=c(recovers_S_L, recovers_S_L, 0),
+    N=c(recovers_S_N, recovers_S_N, 0), X=c(recovers_S_X, recovers_S_X, 0))
+
+  run_recovers_S <- run_coral_initFluxes(time=time, env=env_recovers_S, pars=pars_sen, initjHG=0, initjCP=0)
+  cnlim_recovers_S <- cn_limitation(run_recovers_S, pars_sen)
+
+  plot(time, run_recovers_S$S/run_recovers_S$H, type="l", col=colSen, lty=2, lwd=3,
+  	xlab="Time (days)", ylab="Symbiont:host ratio",
+  	main="(b) Recovery with sen.", ylim=c(0, 0.3))
+  lines(time[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+    (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
+  	lwd=3, col=colSen)
+
+  # Recovers with T
+  env_recovers_T <- init_env(time=time, L=c(recovers_T_L, recovers_T_L, 0),
+    N=c(recovers_T_N, recovers_T_N, 0), X=c(recovers_T_X, recovers_T_X, 0))
+
+  run_recovers_T <- run_coral_initFluxes(time=time, env=env_recovers_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_T <- cn_limitation(run_recovers_T, pars_both)
+
+  plot(time, run_recovers_T$S.1/run_recovers_T$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="(c) Recovery w/ tol.", ylim=c(0, 0.45))
+  lines(time[(run_recovers_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_T$S.1/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colSen)
+
+  lines(time, run_recovers_T$S.2/run_recovers_T$H, type="l", col=colTol, lty=2, lwd=2)
+  lines(time[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_T$S.2/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colTol)
+
+  # Recovers with S in presence of T
+  env_recovers_S_ip_T <- init_env(time=time, L=c(recovers_S_ip_T_L, recovers_S_ip_T_L, 0),
+    N=c(recovers_S_ip_T_N, recovers_S_ip_T_N, 0), X=c(recovers_S_ip_T_X, recovers_S_ip_T_X, 0))
+
+  run_recovers_S_ip_T <- run_coral_initFluxes(time=time, env=env_recovers_S_ip_T, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  cnlim_recovers_S_ip_T <- cn_limitation(run_recovers_S_ip_T, pars_both)
+
+  plot(time, run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="Symbiont:host ratio",
+    main="(d) Recovery w/ sen.\nin presence of tol.", ylim=c(0, 0.3))
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=3, col=colSen)
+
+  lines(time, run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H, type="l", col=colTol, lty=2, lwd=2)
+  lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    (run_recovers_S_ip_T$S.2/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
+    #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
+    lwd=2, col=colTol)
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Sen. symb. (recovered)", "Sen. symb. (pre-recovery)", "Tol. symb. (recovered)", "Tol. symb. (pre-recovery)"),
+  	col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+  # dev.off()
+```
+
+## Figure 4: Distribution of post-bleaching outcomes
+
+### Moment of recovery
+```{r fig4-moment-of-recovery, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery[, c("outcomeMomentRecovery", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeMomentRecovery ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.35,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.55,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+    xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery$L[(sim_recovery$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery$L[(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery$L[(sim_recovery$outcomeMomentRecovery == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery$L[(sim_recovery$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$L[(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery$N[(sim_recovery$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery$N[(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery$N[(sim_recovery$outcomeMomentRecovery == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery$N[(sim_recovery$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$N[(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery$X[(sim_recovery$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery$X[(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery$X[(sim_recovery$outcomeMomentRecovery == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery$X[(sim_recovery$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$X[(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+### 1000 days post-bleaching
+```{r fig4-day1000, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery[, c("outcomeDay1000", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeDay1000 ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.35,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.55,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+    xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery$outcomeDay1000 == "Recovers-S")],
+    sim_recovery$L[(sim_recovery$outcomeDay1000 == "Recovers-T")],
+    sim_recovery$L[(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery$L[(sim_recovery$outcomeDay1000 == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery$L[(sim_recovery$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$L[(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery$outcomeDay1000 == "Recovers-S")],
+    sim_recovery$N[(sim_recovery$outcomeDay1000 == "Recovers-T")],
+    sim_recovery$N[(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery$N[(sim_recovery$outcomeDay1000 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery$N[(sim_recovery$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$N[(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery$outcomeDay1000 == "Recovers-S")],
+    sim_recovery$X[(sim_recovery$outcomeDay1000 == "Recovers-T")],
+    sim_recovery$X[(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery$X[(sim_recovery$outcomeDay1000 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery$X[(sim_recovery$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$X[(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+### 10 years post-bleaching
+```{r fig4-year10, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery[, c("outcomeYear10", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeYear10 ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.35,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.55,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+    xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery$outcomeYear10 == "Recovers-S")],
+    sim_recovery$L[(sim_recovery$outcomeYear10 == "Recovers-T")],
+    sim_recovery$L[(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery$L[(sim_recovery$outcomeYear10 == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery$L[(sim_recovery$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$L[(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery$outcomeYear10 == "Recovers-S")],
+    sim_recovery$N[(sim_recovery$outcomeYear10 == "Recovers-T")],
+    sim_recovery$N[(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery$N[(sim_recovery$outcomeYear10 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery$N[(sim_recovery$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$N[(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery$outcomeYear10 == "Recovers-S")],
+    sim_recovery$X[(sim_recovery$outcomeYear10 == "Recovers-T")],
+    sim_recovery$X[(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery$X[(sim_recovery$outcomeYear10 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery$X[(sim_recovery$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$X[(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+## Figure S6: Effect of dissolved organic carbon
+
+### Moment of recovery
+```{r figS6-moment-of-recovery, cache=TRUE, dependson=c("sim-recovery-doc", "categorize-moment-of-recovery-doc"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery_doc[, c("outcomeMomentRecovery", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeMomentRecovery ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("DOC_bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") - 0.55,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") - 0.35,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] - 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") + 0.4, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") + 0.3,
+    xright=1.25*outlda$scaling[2,1] + 0.6, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.5,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] + 0.5, y=1.25*outlda$scaling[2,2] + 0.4, adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeMomentRecovery == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery_doc$L[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$L[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeMomentRecovery == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery_doc$N[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$N[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeMomentRecovery == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery_doc$X[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$X[(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+### 1000 days post-bleaching
+```{r figS6-day1000, cache=TRUE, dependson=c("sim-recovery-doc", "categorize-day1000-doc"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery_doc[, c("outcomeDay1000", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeDay1000 ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("DOC_bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") - 0.55,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") - 0.35,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] - 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") + 0.4, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") + 0.3,
+    xright=1.25*outlda$scaling[2,1] + 0.6, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.5,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] + 0.5, y=1.25*outlda$scaling[2,2] + 0.4, adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcomeDay1000 == "Recovers-S")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeDay1000 == "Recovers-T")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeDay1000 == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery_doc$L[(sim_recovery_doc$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$L[(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcomeDay1000 == "Recovers-S")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeDay1000 == "Recovers-T")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeDay1000 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery_doc$N[(sim_recovery_doc$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$N[(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcomeDay1000 == "Recovers-S")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeDay1000 == "Recovers-T")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeDay1000 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery_doc$X[(sim_recovery_doc$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$X[(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+### 10 years post-bleaching
+```{r figS6-year10, cache=TRUE, dependson=c("sim-recovery-doc", "categorize-year10-doc"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery_doc[, c("outcomeYear10", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeYear10 ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("DOC_bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") - 0.55,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") - 0.35,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] - 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") + 0.4, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") + 0.3,
+    xright=1.25*outlda$scaling[2,1] + 0.6, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.5,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] + 0.5, y=1.25*outlda$scaling[2,2] + 0.4, adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcomeYear10 == "Recovers-S")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeYear10 == "Recovers-T")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery_doc$L[(sim_recovery_doc$outcomeYear10 == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery_doc$L[(sim_recovery_doc$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$L[(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcomeYear10 == "Recovers-S")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeYear10 == "Recovers-T")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery_doc$N[(sim_recovery_doc$outcomeYear10 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery_doc$N[(sim_recovery_doc$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$N[(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcomeYear10 == "Recovers-S")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeYear10 == "Recovers-T")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery_doc$X[(sim_recovery_doc$outcomeYear10 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery_doc$X[(sim_recovery_doc$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery_doc$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery_doc$X[(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_doc$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+## Figure S9: Requiring functional symbiosis for recovery (i.e. host must NOT be carbon limited)
+
+### Moment of recovery
+```{r figS9-moment-of-recovery, cache=TRUE, dependson=c("sim-recovery-noClimH", "categorize-moment-of-recovery-noClimH"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery_noClimH[, c("outcomeMomentRecovery", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeMomentRecovery ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.35,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.55,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+    xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeMomentRecovery == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery$L[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$L[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeMomentRecovery == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery$N[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$N[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeMomentRecovery == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery$X[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$X[(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeMomentRecovery == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+### 1000 days post-bleaching
+```{r figS9-day1000, cache=TRUE, dependson=c("sim-recovery-noClimH", "categorize-day1000-noClimH"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery_noClimH[, c("outcomeDay1000", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeDay1000 ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.35,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.55,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+    xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeDay1000 == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery$L[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$L[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeDay1000 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery$N[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$N[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeDay1000 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery$X[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeDay1000 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$X[(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeDay1000 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+### 10 years post-bleaching
+```{r figS9-year10, cache=TRUE, dependson=c("sim-recovery-noClimH", "categorize-year10-noClimH"), fig.width=10, fig.height=5}
+  #### Linear discriminant analysis ####
+
+  # Center and scale the environmental variables
+  datalda <- sim_recovery_noClimH[, c("outcomeYear10", "L", "N", "X")]
+  datalda$L <- (datalda$L - mean(datalda$L))/sd(datalda$L)
+  datalda$N <- (datalda$N - mean(datalda$N))/sd(datalda$N)
+  datalda$X <- (datalda$X - mean(datalda$X))/sd(datalda$X)
+
+  # Run the linear discriminant analysis
+  outlda <- lda(outcomeYear10 ~ L + N + X, datalda)
+
+  # Plot the data on the linear discriminant axes
+  #pdf("bleaching_recovery.pdf", 10, 5)
+  layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
+
+  plot(predict(outlda)$x[,1], predict(outlda)$x[,2],
+    col=c(transparent(colSen, 0.05), colRescue, colTol, transparent(colNS, 0.0075))[datalda$outcome],
+  	pch=c(pchSen, pchRescue, pchTol, pchNS)[datalda$outcome],
+    xlab="LD 1", ylab="LD 2", main="(a) Linear discriminant analysis")
+
+  # Add arrows representing the environmental variables in LD space
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[1,1], y1=1.5*outlda$scaling[1,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[1,1] - strwidth("Light")/2 - 0.1, ybottom=1.25*outlda$scaling[1,2] - 0.5*strheight("Light") + 0.35,
+    xright=1.25*outlda$scaling[1,1] + strwidth("Light")/2 + 0.1, ytop=1.25*outlda$scaling[1,2] + 0.5*strheight("Light") + 0.55,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[1,1], y=1.25*outlda$scaling[1,2] + 0.45, labels="Light", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[2,1], y1=1.5*outlda$scaling[2,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[2,1] - strwidth("Nitrogen") - 0.35, ybottom=1.25*outlda$scaling[2,2] - 0.5*strheight("Nitrogen") - 0.1,
+    xright=1.25*outlda$scaling[2,1] - 0.15, ytop=1.25*outlda$scaling[2,2] + 0.5*strheight("Nitrogen") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[2,1] - 0.25, y=1.25*outlda$scaling[2,2], adj=1, labels="Nitrogen", col="black")
+
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="white", lwd=5)
+  arrows(x0=0, y0=0, x1=1.5*outlda$scaling[3,1], y1=1.5*outlda$scaling[3,2], length=0.1, col="black", lwd=2)
+  rect(xleft=1.25*outlda$scaling[3,1] - strwidth("Prey") - 0.55, ybottom=1.25*outlda$scaling[3,2] - 0.5*strheight("Prey") - 0.1,
+    xright=1.25*outlda$scaling[3,1] - 0.35, ytop=1.25*outlda$scaling[3,2] + 0.5*strheight("Prey") + 0.1,
+    col="white", border=NA)
+  text(x=1.25*outlda$scaling[3,1] - 0.45, y=1.25*outlda$scaling[3,2], adj=1, labels="Prey", col="black")
+
+  #### Plot competition outcome vs each environmental variable ####
+
+  # Light
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery$L[(sim_recovery_noClimH$outcomeYear10 == "No-survival")]),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
+    xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
+
+  # Place markers where cases of tolerant-required recovery occur
+  points(sim_recovery$L[(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$L[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Nitrogen
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery$N[(sim_recovery_noClimH$outcomeYear10 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
+
+  points(sim_recovery$N[(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$N[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+  # Prey
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")],
+    sim_recovery$X[(sim_recovery_noClimH$outcomeYear10 == "No-survival")]),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
+    xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
+
+  points(sim_recovery$X[(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")],
+    rep(115, sum(sim_recovery_noClimH$outcomeYear10 == "Recovers-T")),col=colTol, pch=pchTol)
+
+  points(sim_recovery$X[(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")],
+    rep(105, sum(sim_recovery_noClimH$outcomeYear10 == "Recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+
+
+  # Legend
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Recovers w/ S", "Recovers w/ T", "Recovers w/ S in p. T", "Does not recover"),
+  	col=c(colSen, colTol, colRescue, colNS), pch=c(pchSen, pchTol, pchRescue, pchNS),
+  	title="Post-bleaching outcome", cex=1.3, pt.cex=1.5)
+  #dev.off()
+
+  # Print the results of the linear discriminant analysis
+  outlda
+```
+
+# Sample plots
+```{r sample-plots, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery", "categorize-day1000"), fig.width=15, fig.heigh=10}
+
+#pdf("post_recovery_dynamics.pdf", 20, 10)
+par(mfrow=c(4, 5))
+for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"][1:19]) {
+  classification1 <- c("sen", "tol")[(sim_recovery$outcomeMomentRecovery[i] == "Recovers-T") + 1]
+  classification2 <- c("sen", "tol")[(sim_recovery$outcomeDay1000[i] == "Recovers-T") + 1]
+  classification <- paste0(classification1, " -> ", classification2)
+
+
+  time <- seq(0, 1000, 0.1)
+  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+  run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+  plot(time, run_both$S.1/run_both$H, type="l", col=colSen, lty=2, lwd=3,
+    xlab="Time (days)", ylab="S:H", main=paste0("Sim ", i, ": ", classification),
+    ylim=c(0, max(c(run_both$S.1/run_both$H, run_both$S.2/run_both$H))))
+  points(time[(run_both$dH.Hdt > 0)], (run_both$S.1/run_both$H)[(run_both$dH.Hdt > 0)], pch=16, col=colSen)
+
+  lines(time, run_both$S.2/run_both$H, type="l", col=colTol, lty=2, lwd=2)
+  points(time[(run_both$dH.Hdt > 0)], (run_both$S.2/run_both$H)[(run_both$dH.Hdt > 0)], pch=20, col=colTol)
+}
+
+par(mar=c(0,0,0,0))
+plot.new()
+legend("center", c("Sen. symb. (host growing)", "Sen. symb. (host growth rate <= 0)", "Tol. symb. (host growing)", "Tol. symb. (host growth rate <= 0)"),
+  col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+
+#dev.off()
+```
