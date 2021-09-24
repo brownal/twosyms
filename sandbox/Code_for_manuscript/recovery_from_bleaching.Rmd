@@ -273,48 +273,48 @@ output:
   #### Plot competition outcome vs each environmental variable ####
 
   # Light
-  stackedHist(data=list(sim_recovery$L[(sim_recovery$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery$outcome == "recovers-S")],
     sim_recovery$L[(sim_recovery$outcome == "recovers-T")],
     sim_recovery$L[(sim_recovery$outcome == "recovers-S-ip-T")],
     sim_recovery$L[(sim_recovery$outcome == "No-survival")]),
-    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 6), colors=c(colSen, colTol, colRescue, colNS),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
     xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
 
   # Place markers where cases of tolerant-required recovery occur
   points(sim_recovery$L[(sim_recovery$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery$L[(sim_recovery$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Nitrogen
-  stackedHist(data=list(sim_recovery$N[(sim_recovery$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery$outcome == "recovers-S")],
     sim_recovery$N[(sim_recovery$outcome == "recovers-T")],
     sim_recovery$N[(sim_recovery$outcome == "recovers-S-ip-T")],
     sim_recovery$N[(sim_recovery$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
   points(sim_recovery$N[(sim_recovery$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery$N[(sim_recovery$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
   # Prey
-  stackedHist(data=list(sim_recovery$X[(sim_recovery$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery$outcome == "recovers-S")],
     sim_recovery$X[(sim_recovery$outcome == "recovers-T")],
     sim_recovery$X[(sim_recovery$outcome == "recovers-S-ip-T")],
     sim_recovery$X[(sim_recovery$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
 
   points(sim_recovery$X[(sim_recovery$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery$X[(sim_recovery$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Legend
@@ -376,48 +376,48 @@ output:
   #### Plot competition outcome vs each environmental variable ####
 
   # Light
-  stackedHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S")],
     sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-T")],
     sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
     sim_recovery_doc$L[(sim_recovery_doc$outcome == "No-survival")]),
-    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 6), colors=c(colSen, colTol, colRescue, colNS),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
     xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
 
   # Place markers where cases of tolerant-required recovery occur
   points(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Nitrogen
-  stackedHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S")],
     sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-T")],
     sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
     sim_recovery_doc$N[(sim_recovery_doc$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
   points(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
   # Prey
-  stackedHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S")],
     sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-T")],
     sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
     sim_recovery_doc$X[(sim_recovery_doc$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
 
   points(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Legend
@@ -435,21 +435,21 @@ output:
 # Example plots of each outcome
 
 ```{r example-plots, cache=TRUE, dependson=c("sim-recovery")}
-  recovers_S_ex <- min((1:nrow(sim_recovery))[sim_recovery$outcome == "recovers-S"])
-  recovers_T_ex <- min((1:nrow(sim_recovery))[sim_recovery$outcome == "recovers-T"])
-  recovers_S_ip_T_ex <- (1:nrow(sim_recovery))[sim_recovery$outcome == "recovers-S-ip-T"][2]
+  # recovers_S_ex <- min((1:nrow(sim_recovery))[sim_recovery$outcome == "recovers-S"])
+  # recovers_T_ex <- min((1:nrow(sim_recovery))[sim_recovery$outcome == "recovers-T"])
+  # recovers_S_ip_T_ex <- (1:nrow(sim_recovery))[sim_recovery$outcome == "recovers-S-ip-T"][2]
 
-  recovers_S_L <- sim_recovery$L[recovers_S_ex]
-  recovers_S_N <- sim_recovery$N[recovers_S_ex]
-  recovers_S_X <- sim_recovery$X[recovers_S_ex]
+  recovers_S_L <- 36
+  recovers_S_N <- 8.6e-7
+  recovers_S_X <- 3.9e-7
 
-  recovers_T_L <- sim_recovery$L[recovers_T_ex]
-  recovers_T_N <- sim_recovery$N[recovers_T_ex]
-  recovers_T_X <- sim_recovery$X[recovers_T_ex]
+  recovers_T_L <- 41
+  recovers_T_N <- 8.6e-6
+  recovers_T_X <- 4e-7
 
-  recovers_S_ip_T_L <- sim_recovery$L[recovers_S_ip_T_ex]
-  recovers_S_ip_T_N <- sim_recovery$N[recovers_S_ip_T_ex]
-  recovers_S_ip_T_X <- sim_recovery$X[recovers_S_ip_T_ex]
+  recovers_S_ip_T_L <- 31.5
+  recovers_S_ip_T_N <- 6.5e-7
+  recovers_S_ip_T_X <- 2.8e-7
 
   pdf("example_outcomes.pdf", 15, 7.5)
   layout(matrix(c(1, 1, 2, 3, 1, 1, 4, 5), nrow=2, byrow=TRUE), respect=TRUE)
@@ -471,7 +471,7 @@ output:
 
   plot(time, run_recovers_S$S/run_recovers_S$H, type="l", col=colSen, lty=2, lwd=3,
   	xlab="Time (days)", ylab="Symbiont:host ratio",
-  	main="(b) Recovery with sen.", ylim=c(0, 0.3))
+  	main="(b) Recovery with sen.", ylim=c(0, 0.4))
   lines(time[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
     (run_recovers_S$S/run_recovers_S$H)[(run_recovers_S$dH.Hdt > 0)], #& (cnlim_recovers_S$H >= 0) & (cnlim_recovers_S$S >= 0)],
   	lwd=3, col=colSen)
@@ -485,7 +485,7 @@ output:
 
   plot(time, run_recovers_T$S.1/run_recovers_T$H, type="l", col=colSen, lty=2, lwd=3,
     xlab="Time (days)", ylab="Symbiont:host ratio",
-    main="(c) Recovery w/ tol.", ylim=c(0, 0.3))
+    main="(c) Recovery w/ tol.", ylim=c(0, 0.4))
   lines(time[(run_recovers_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
     (run_recovers_T$S.1/run_recovers_T$H)[(run_recovers_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
     #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
@@ -506,7 +506,7 @@ output:
 
   plot(time, run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H, type="l", col=colSen, lty=2, lwd=3,
     xlab="Time (days)", ylab="Symbiont:host ratio",
-    main="(d) Recovery w/ sen.\nin presence of tol.", ylim=c(0, 0.3))
+    main="(d) Recovery w/ sen.\nin presence of tol.", ylim=c(0, 0.4))
   lines(time[(run_recovers_S_ip_T$dH.Hdt > 0)], # & (cnlim_recovers_S_ip_T$H >= 0) & (cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
     (run_recovers_S_ip_T$S.1/run_recovers_S_ip_T$H)[(run_recovers_S_ip_T$dH.Hdt > 0)], #& (cnlim_recovers_S_ip_T$H >= 0) &
     #(cnlim_recovers_S_ip_T$S.1 >= 0) & (cnlim_recovers_S_ip_T$S.2 >= 0)],
@@ -523,6 +523,5 @@ output:
   plot.new()
   legend("center", c("Sen. symb. (recovered)", "Sen. symb. (pre-recovery)", "Tol. symb. (recovered)", "Tol. symb. (pre-recovery)"),
   	col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
-dev.off()
-
+  dev.off()
 ```

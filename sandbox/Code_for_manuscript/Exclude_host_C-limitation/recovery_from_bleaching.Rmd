@@ -267,48 +267,48 @@ output:
   #### Plot competition outcome vs each environmental variable ####
 
   # Light
-  stackedHist(data=list(sim_recovery$L[(sim_recovery$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery$L[(sim_recovery$outcome == "recovers-S")],
     sim_recovery$L[(sim_recovery$outcome == "recovers-T")],
     sim_recovery$L[(sim_recovery$outcome == "recovers-S-ip-T")],
     sim_recovery$L[(sim_recovery$outcome == "No-survival")]),
-    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 6), colors=c(colSen, colTol, colRescue, colNS),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
     xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
 
   # Place markers where cases of tolerant-required recovery occur
   points(sim_recovery$L[(sim_recovery$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery$L[(sim_recovery$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Nitrogen
-  stackedHist(data=list(sim_recovery$N[(sim_recovery$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery$N[(sim_recovery$outcome == "recovers-S")],
     sim_recovery$N[(sim_recovery$outcome == "recovers-T")],
     sim_recovery$N[(sim_recovery$outcome == "recovers-S-ip-T")],
     sim_recovery$N[(sim_recovery$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
   points(sim_recovery$N[(sim_recovery$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery$N[(sim_recovery$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
   # Prey
-  stackedHist(data=list(sim_recovery$X[(sim_recovery$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery$X[(sim_recovery$outcome == "recovers-S")],
     sim_recovery$X[(sim_recovery$outcome == "recovers-T")],
     sim_recovery$X[(sim_recovery$outcome == "recovers-S-ip-T")],
     sim_recovery$X[(sim_recovery$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
 
   points(sim_recovery$X[(sim_recovery$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery$X[(sim_recovery$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Legend
@@ -370,48 +370,48 @@ output:
   #### Plot competition outcome vs each environmental variable ####
 
   # Light
-  stackedHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S")],
     sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-T")],
     sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
     sim_recovery_doc$L[(sim_recovery_doc$outcome == "No-survival")]),
-    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 6), colors=c(colSen, colTol, colRescue, colNS),
+    breaks=seq(5, 60, 2.5), xlim=c(5, 60), ylim=c(0, 120), colors=c(colSen, colTol, colRescue, colNS),
     xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
 
   # Place markers where cases of tolerant-required recovery occur
   points(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery_doc$L[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Nitrogen
-  stackedHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S")],
     sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-T")],
     sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
     sim_recovery_doc$N[(sim_recovery_doc$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
   points(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery_doc$N[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
   # Prey
-  stackedHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S")],
+  evenBarsHist(data=list(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S")],
     sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-T")],
     sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
     sim_recovery_doc$X[(sim_recovery_doc$outcome == "No-survival")]),
-    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 6),
+    colors=c(colSen, colTol, colRescue, colNS), ylim=c(0, 120),
     xlab="Prey (mol/L)", ylab="% Simulations", main="(d) Prey")
 
   points(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-T")],
-    rep(6, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
+    rep(115, sum(sim_recovery_doc$outcome == "recovers-T")),col=colTol, pch=pchTol)
 
   points(sim_recovery_doc$X[(sim_recovery_doc$outcome == "recovers-S-ip-T")],
-    rep(5.5, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
+    rep(105, sum(sim_recovery_doc$outcome == "recovers-S-ip-T")),col=colRescue, pch=pchRescue)
 
 
   # Legend
