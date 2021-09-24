@@ -2014,36 +2014,112 @@ Dominant symbiont: immediately post-recovery -> 1000 days post-bleaching -> 10 y
   outlda
 ```
 
-# Sample plots
+# Sample plots and comparison plots
+
 ```{r sample-plots, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery", "categorize-day1000"), fig.width=15, fig.heigh=10}
 
-#pdf("post_recovery_dynamics.pdf", 20, 10)
-par(mfrow=c(4, 5))
-for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"][1:19]) {
-  classification1 <- c("sen", "tol")[(sim_recovery$outcomeMomentRecovery[i] == "Recovers-T") + 1]
-  classification2 <- c("sen", "tol")[(sim_recovery$outcomeDay1000[i] == "Recovers-T") + 1]
-  classification <- paste0(classification1, " -> ", classification2)
+  #pdf("post_recovery_dynamics.pdf", 20, 10)
+  par(mfrow=c(4, 5))
+  for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"][1:19]) {
+    classification1 <- c("sen", "tol")[(sim_recovery$outcomeMomentRecovery[i] == "Recovers-T") + 1]
+    classification2 <- c("sen", "tol")[(sim_recovery$outcomeDay1000[i] == "Recovers-T") + 1]
+    classification <- paste0(classification1, " -> ", classification2)
 
 
+    time <- seq(0, 1000, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    plot(time, run_both$S.1/run_both$H, type="l", col=colSen, lty=2, lwd=3,
+      xlab="Time (days)", ylab="S:H", main=paste0("Sim ", i, ": ", classification),
+      ylim=c(0, max(c(run_both$S.1/run_both$H, run_both$S.2/run_both$H))))
+    points(time[(run_both$dH.Hdt > 0)], (run_both$S.1/run_both$H)[(run_both$dH.Hdt > 0)], pch=16, col=colSen)
+
+    lines(time, run_both$S.2/run_both$H, type="l", col=colTol, lty=2, lwd=2)
+    points(time[(run_both$dH.Hdt > 0)], (run_both$S.2/run_both$H)[(run_both$dH.Hdt > 0)], pch=20, col=colTol)
+  }
+
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Sen. symb. (host growing)", "Sen. symb. (host growth rate <= 0)", "Tol. symb. (host growing)", "Tol. symb. (host growth rate <= 0)"),
+    col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+
+  #dev.off()
+```
+
+```{r sample-plots-change-moment-recovery-day1000, cache=TRUE}
   time <- seq(0, 1000, 0.1)
-  env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
-    N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+  envList <- list(env1=coRal::init_env(time, L=c(21, 21, 0), N=c(4.6e-6, 4.6e-6, 0), X=c(3.2e-7, 3.2e-7, 0)),
+    env2=coRal::init_env(time, L=c(35, 35, 0), N=c(2.9e-6, 2.9e-6, 0), X=c(3.3e-7, 3.3e-7, 0)),
+    env3=coRal::init_env(time, L=c(27, 27, 0), N=c(1.6e-7, 1.6e-7, 0), X=c(1.4e-7, 1.4e-7, 0)))
 
-  run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+  #pdf("post_recovery_dynamics.pdf", 20, 10)
 
-  plot(time, run_both$S.1/run_both$H, type="l", col=colSen, lty=2, lwd=3,
-    xlab="Time (days)", ylab="S:H", main=paste0("Sim ", i, ": ", classification),
-    ylim=c(0, max(c(run_both$S.1/run_both$H, run_both$S.2/run_both$H))))
-  points(time[(run_both$dH.Hdt > 0)], (run_both$S.1/run_both$H)[(run_both$dH.Hdt > 0)], pch=16, col=colSen)
+  par(mfrow=c(2, 2))
+  for (i in 1:3) {
 
-  lines(time, run_both$S.2/run_both$H, type="l", col=colTol, lty=2, lwd=2)
-  points(time[(run_both$dH.Hdt > 0)], (run_both$S.2/run_both$H)[(run_both$dH.Hdt > 0)], pch=20, col=colTol)
-}
+    env <- envList[[i]]
 
-par(mar=c(0,0,0,0))
-plot.new()
-legend("center", c("Sen. symb. (host growing)", "Sen. symb. (host growth rate <= 0)", "Tol. symb. (host growing)", "Tol. symb. (host growth rate <= 0)"),
-  col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
 
-#dev.off()
+    plot(time, run_both$S.1/run_both$H, type="l", col=colSen, lty=2, lwd=3,
+      xlab="Time (days)", ylab="S:H", main=paste0(c("(a)", "(b)", "(c)")[[i]], " Example plot: switch to tolerant\ndominance post-recovery"),
+      ylim=c(0, max(c(run_both$S.1/run_both$H, run_both$S.2/run_both$H))))
+    points(time[(run_both$dH.Hdt > 0)], (run_both$S.1/run_both$H)[(run_both$dH.Hdt > 0)], pch=16, col=colSen)
+
+    lines(time, run_both$S.2/run_both$H, type="l", col=colTol, lty=2, lwd=2)
+    points(time[(run_both$dH.Hdt > 0)], (run_both$S.2/run_both$H)[(run_both$dH.Hdt > 0)], pch=20, col=colTol)
+  }
+
+  par(mar=c(0,0,0,0))
+  plot.new()
+  legend("center", c("Sen. symb. (host growing)", "Sen. symb. (host growth rate <= 0)", "Tol. symb. (host growing)", "Tol. symb. (host growth rate <= 0)"),
+    col=c(colSen, colSen, colTol, colTol), lwd=c(3, 3, 2, 2), lty=c(1, 2, 1, 2))
+```
+
+```{r compare-env-outcome-change, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery", "categorize-day1000")}
+  ###### Compare the change in outcomes between moment of recovery and day 1000 across environmental variables ######
+
+  # Find outcomes
+  senToTol <- (sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T") &
+  	(sim_recovery$outcomeDay1000 == "Recovers-T")
+
+  tolToSen <- (sim_recovery$outcomeMomentRecovery == "Recovers-T") &
+  	(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")
+
+  unchanged <- (sim_recovery$outcome == "Recovers-T-assisted") & !(senToTol) & !(tolToSen)
+
+  # Make plots
+  pdf("tolerant_assisted_recovery_symbiont_changes.pdf", 8, 6)
+  par(mfrow=c(2,2))
+
+  # Light
+  evenBarsHist(list(sim_recovery$L[unchanged], sim_recovery$L[tolToSen], sim_recovery$L[senToTol]),
+    col=c(colEither, colSen, colTol),
+    main="(a) Change in symbiont abundance vs. light",
+    xlab="Light (mol photons/m^2/d)", ylab="% of simulations")
+
+  # Nitrogen
+  evenBarsHist(list(sim_recovery$N[unchanged], sim_recovery$N[tolToSen], sim_recovery$N[senToTol]),
+    col=c(colEither, colSen, colTol),
+    main="(b) Change in symbiont abundance vs. nitrogen",
+    xlab="Nitrogen (mol/L)", ylab="% of simulations")
+
+  # Prey
+  evenBarsHist(list(sim_recovery$X[unchanged], sim_recovery$X[tolToSen], sim_recovery$X[senToTol]),
+    breaks=seq(1e-7, 4e-7, 5e-8),
+    col=c(colEither, colSen, colTol),
+    main="(c) Change in symbiont abundance vs. prey",
+    xlab="Prey (mol/L)", ylab="% of simulations")
+
+  # Legend
+  plot.new()
+  par(mar=c(0,0,0,0))
+  legend("center", c("\nNo change\n", "Sensitive -> tolerant"), col=c(colEither, colTol), pch=15,
+    title="Change in more abundant symbiont from\nimmediately post-recovery to 1000 days\npost-bleaching",
+    bty="n")
+
+  dev.off()
 ```
