@@ -1,0 +1,364 @@
+---
+title: "Which symbiont is more abundant at different time points after recovery from bleaching?"
+author: "A.L. Brown. F. Pfab, E.C. Baxter, A.R. Detmer, H.V. Moeller, R.M. Nisbet, and R. Cunning"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+      html_document:
+            code_folding: hide
+---
+
+```{r set-options}
+  # Set kintr options
+  knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width=8, fig.height=8, results='hold')
+
+  # Load packages
+  library("coRal")
+  library("foreach")
+  library("parallel")
+  library("doParallel")
+  library("MASS")
+  library("knitr")
+
+  # Plot size for running this in-line
+  options(repr.plot.res=240)
+
+  # Load functions
+  source("synth.R") # synthesizing unit (used in run_coral_competitive exclusion)
+  source("cn_limitation.R") # calculates carbon/nitrogen limitation of host and symbiont growth SUs
+  source("run_coral_competitive_exclusion.R") # run_coral that stops when symbiont 2 has declined to a certain fraction of symbiont 1
+  source("plotting_functions.R") # some custom plotting functions
+  source("run_coral_initFluxes.R") # allows simulation to be initialized with custom values of host growth & photosynthesis fluxes
+  source("run_coral_oc_initFluxes.R") # same as above, but with a constant input of organic carbon to the host
+
+  # Define colors
+  colSen <- "#648FFF"
+  colTol <- "#FFB000"
+  colNS <- "#000000"
+  colEither <- "#00FABE"
+  colRescue <- "#DC267F"
+
+  # Define plotting symbols
+  pchSen <- 1
+  pchTol <- 19
+  pchNS <- 0
+  pchEither <- 3
+  pchRescue <- 15
+```
+
+# Simulate bleached hosts
+
+```{r set-pars, cache=TRUE}
+  #### Set parameters ####
+
+  # Parameters for host with just sensitive symbionts
+  pars_sen <- def_pars()
+  pars_sen$initS <- 1e-4
+
+  # Parameters for hosts with sensitive and tolerant symbionts
+  pars_both <- def_pars(nsym=2)
+  pars_both$jCPm[2] <- 1.0
+  pars_both$kROS[2] <- 250
+  pars_both$jSGm[2] <- 0.15
+  pars_both$initS[1:2] <- c(0.5, 0.5)*1e-4
+
+  # Randomly draw the environmental parameters
+  env_params <- data.frame("L"=runif(150000, 5, 60), # Light, choose values between 5 and 60 mol photons/m^2/d
+    "N"=runif(150000, 1e-8, 1e-5), # DIN, choose values between 1e-8 and 1e-5 mol/L
+    "X" = runif(150000, 0, 4e-7)) # Prey, choose values between 0 and 4e-7 mol/L
+
+  # run simulations for 100 days to determine survival
+  survival_time <-seq(0, 100, 0.1)
+```
+
+```{r sim-recovery, cache=TRUE, dependson=c("set-pars")}
+  #### Simulate host recovery from bleaching ####
+
+  # Set up to run simulations in parallel
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  # results will temporarily hold the summary statistics from the simulations
+  results <- foreach(i=1:nrow(env_params), .combine='rbind', .packages='dplyr') %dopar% {
+
+    # recovery_outcome will be a categorical variable that describes the host's ability to recover from
+    # bleaching with sensitive or sensitive + tolerant symbionts, and what happens afterward
+    outcome <- NA
+
+    # Set up the environmental conditions
+    env_survival_time <- coRal::init_env(time=survival_time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    # Simulate corals for 100 days post-bleaching to see if they recover
+    run_sen_survival <- run_coral_initFluxes(time=survival_time, env=env_survival_time, pars=pars_sen, initjHG=0, initjCP=0)
+
+    # Calculate C-N limitation
+    cnlim_sen_survival <- cn_limitation(run_sen_survival, pars_sen)
+    noClimH_sen_survival <- (cnlim_sen_survival$H[length(survival_time)] >= 0)
+
+    # Calculate host growth rate
+    posGrH_sen_survival <- (run_sen_survival$dH.Hdt[length(survival_time)] > 0)
+
+    # Does the host survive with just sensitive symbionts?
+    if(posGrH_sen_survival) { #& noClimAll_sen_survival) {
+      outcome <- "Recovers-S" # recovers with sensitive symbiont
+    } else {
+      # Does the host survival & maintain a functional symbiosis with sensitive & tolerant symbionts?
+      run_both_survival <- run_coral_initFluxes(time=survival_time, env=env_survival_time, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+      # Calculate C-N limitation
+      cnlim_both_survival <- cn_limitation(run_both_survival, pars_both)
+      cnlimH_both_survival <- (cnlim_both_survival$H[length(survival_time)] >= 0)
+
+      # Calculate host growth rate
+      posGrH_both_survival <- (run_both_survival$dH.Hdt[length(survival_time)] > 0)
+
+      if (posGrH_both_survival) { #& noClimH_both_survival) {
+        # Addition of the tolerant symbiont enables host survival
+        # We'll categorize these simulations further later
+        outcome <- "Recovers-T-assisted"
+      } else {
+        # Neither sensitive symbiont alone nor sensitive + tolerant symbiont enabled recovery from bleaching
+        outcome <- "No-survival"
+      }
+    }
+
+    # Return the environmental parameters and recovery information
+    list("L"=env_params[i, "L"], "N"=env_params[i, "N"], "X"=env_params[i, "X"],
+      "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe, set column types
+  sim_recovery <- data.frame(results, row.names=NULL)
+  sim_recovery <- transform(sim_recovery, L=as.numeric(L), N=as.numeric(N), X=as.numeric(X),
+    outcome=factor(outcome, levels=c("Recovers-S", "Recovers-T-assisted", "No-survival")))
+```
+
+#  Categorize the tolerant-assisted outcomes
+
+## Categorize using sensitive:tolerant ratio at moment of recovery
+```{r categorize-moment-of-recovery, cache=TRUE, dependson=c("sim-recovery")}
+  ######## Check which symbiont is numerically dominant at the moment of recovery from bleaching #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+  #for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    time <- seq(0, 100, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+    time_posGrH <- min(time[run_both$dH.Hdt > 0]) # If initjG is not 0, may have to worry about "catching" the initialization with this
+
+    # Sensitive:tolerant ratio at the time of return to positive growth
+    logST <- log(run_both$S.1[time == time_posGrH]) - log(run_both$S.2[time == time_posGrH])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsMomentRecovery <- data.frame(results, row.names=NULL)
+  resultsMomentRecovery <- transform(resultsMomentRecovery, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+    "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsMomentRecovery) <- resultsMomentRecovery$sim
+
+  # Go through the simulations and classify the outcomes
+  outcomeMomentRecovery <- factor(sim_recovery$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stMomentRecovery <- rep(NA, nrow(sim_recovery))
+
+  for(i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    outcomeMomentRecovery[i] <- resultsMomentRecovery[[toString(i), "outcome"]]
+    stMomentRecovery[i] <- resultsMomentRecovery[[toString(i), "logST"]]
+  }
+
+  sim_recovery$outcomeMomentRecovery <- outcomeMomentRecovery
+  sim_recovery$stMomentRecovery <- stMomentRecovery
+```
+
+## Categorize using sensitive:tolerant ratio after 1000 days
+```{r categorize-day1000, cache=TRUE, dependson=c("sim-recovery")}
+  ######## Check which symbiont is numerically dominant 1000 days post-bleaching #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+  #for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    time <- seq(0, 1000, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsDay1000 <- data.frame(results, row.names=NULL)
+  resultsDay1000 <- transform(resultsDay1000, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsDay1000) <- resultsDay1000$sim
+
+
+  # Go through the simulations and classify the outcomes
+  outcomeDay1000 <- factor(sim_recovery$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stDay1000 <- rep(NA, nrow(sim_recovery))
+
+  for(i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    outcomeDay1000[i] <- resultsDay1000[[toString(i), "outcome"]]
+    stDay1000[i] <- as.numeric(resultsDay1000[[toString(i), "logST"]])
+  }
+
+  sim_recovery$outcomeDay1000 <- outcomeDay1000
+  sim_recovery$stDay1000 <- stDay1000
+```
+
+## Categorize using sensitive:tolerant ratio after 10 years
+```{r categorize-year10, cache=TRUE, dependson=c("sim-recovery")}
+  ######## Check which symbiont is numerically dominant 10 years post-bleaching #######
+  cl <- makeCluster(detectCores() - 1)
+  registerDoParallel(cl)
+
+  results <- foreach(i=(1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"], .combine='rbind', .packages='dplyr') %dopar% {
+  #for (i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    time <- seq(0, 10*365, 0.1)
+    env <- coRal::init_env(time=time, L=c(env_params[i, "L"], env_params[i, "L"], 0),
+      N=c(env_params[i, "N"], env_params[i, "N"], 0), X=c(env_params[i, "X"], env_params[i, "X"], 0))
+
+    run_both <- run_coral_initFluxes(time=time, env=env, pars=pars_both, initjHG=0, initjCP=c(0, 0))
+
+    # Sensitive:tolerant ratio at 1000 days
+    logST <- log(run_both$S.1[length(time)]) - log(run_both$S.2[(length(time))])
+
+    if (logST > 0) {
+      # There is more sensitive than tolerant
+      outcome <- "Recovers-S-ip-T"
+    } else {
+      # There is at least as much tolerant
+      outcome <- "Recovers-T"
+    }
+
+    # Return the sensitive:tolerant symbiont ratio and outcome classification
+    list("sim"=i, "logST"=logST, "outcome"=outcome)
+  }
+
+  # Stop cluster
+  stopCluster(cl)
+
+  # Store results in dataframe
+  resultsYear10 <- data.frame(results, row.names=NULL)
+  resultsYear10 <- transform(resultsYear10, "sim"=as.numeric(sim), "logST"=as.numeric(logST),
+   "outcome"=factor(outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival")))
+  rownames(resultsYear10) <- resultsYear10$sim
+
+  # Go through the simulations and classify the outcomes
+  outcomeYear10 <- factor(sim_recovery$outcome, levels=c("Recovers-S", "Recovers-S-ip-T", "Recovers-T", "No-survival"))
+  stYear10 <- rep(NA, nrow(sim_recovery))
+
+  for(i in (1:nrow(sim_recovery))[sim_recovery$outcome == "Recovers-T-assisted"]) {
+    outcomeYear10[i] <- resultsYear10[[toString(i), "outcome"]]
+    stYear10[i] <- as.numeric(resultsYear10[[toString(i), "logST"]])
+  }
+
+  sim_recovery$outcomeYear10 <- outcomeYear10
+  sim_recovery$stYear10 <- stYear10
+```
+
+# How do the different classifications compare?
+
+* The most common thing to happen is being sensitive-dominated immediately post-recovery, followed by tolerant-dominated later (see below).
+
+Dominant symbiont: immediately post-recovery -> 1000 days post-bleaching -> 10 years post-bleaching
+```{r compare-classifications, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery", "categorize-day1000", "categorize-year10")}
+  mymat <- matrix(NA, nrow=sum(sim_recovery$outcome=="Recovers-T-assisted"), ncol=3)
+  mymat[,1] <- (sim_recovery[sim_recovery$outcome=="Recovers-T-assisted",]$outcomeMomentRecovery == "Recovers-S-ip-T")
+  mymat[,2] <- (sim_recovery[sim_recovery$outcome=="Recovers-T-assisted",]$outcomeDay1000 == "Recovers-S-ip-T")
+  mymat[,3] <- (sim_recovery[sim_recovery$outcome=="Recovers-T-assisted",]$outcomeYear10 == "Recovers-S-ip-T")
+
+  # Gets all combinations that occur
+  # Missing are false -> true -> false, false -> true -> true: If you start T-dominated,
+  # you either stay that way or it takes you a really long time to not be that way
+  # All true combinations are present: if you start S-dominated, you can remain that way, become T-dominated, and even revert after being T-dominated
+  # Rescue is complex and probably include multiples kinds of transient dynamics!
+  combos <- unique(mymat)
+
+  for (i in 1:nrow(combos)) {
+    print(paste(c("Tol", "Sen")[combos[i,]+1], collapse=" -> "))
+    print(paste0(round(sum((mymat[,1] == combos[i,1]) & (mymat[,2] == combos[i,2]) &
+  	(mymat[,3] == combos[i,3]))/nrow(mymat) * 100, 1), "% of cases"))
+  }
+```
+
+```{r compare-env-outcome-change, cache=TRUE, dependson=c("sim-recovery", "categorize-moment-of-recovery", "categorize-day1000")}
+  ###### Compare the change in outcomes between moment of recovery and day 1000 across environmental variables ######
+
+  # Find outcomes
+  senToTol <- (sim_recovery$outcomeMomentRecovery == "Recovers-S-ip-T") &
+  	(sim_recovery$outcomeDay1000 == "Recovers-T")
+
+  tolToSen <- (sim_recovery$outcomeMomentRecovery == "Recovers-T") &
+  	(sim_recovery$outcomeDay1000 == "Recovers-S-ip-T")
+
+  unchanged <- (sim_recovery$outcome == "Recovers-T-assisted") & !(senToTol) & !(tolToSen)
+
+  # Make plots
+  pdf("tolerant_assisted_recovery_symbiont_changes.pdf", 8, 6)
+  par(mfrow=c(2,2))
+
+  # Light
+  evenBarsHist(list(sim_recovery$L[unchanged], sim_recovery$L[tolToSen], sim_recovery$L[senToTol]),
+    col=c(colEither, colSen, colTol),
+    main="(a) Change in symbiont abundance vs. light",
+    xlab="Light (mol photons/m^2/d)", ylab="% of simulations")
+
+  # Nitrogen
+  evenBarsHist(list(sim_recovery$N[unchanged], sim_recovery$N[tolToSen], sim_recovery$N[senToTol]),
+    col=c(colEither, colSen, colTol),
+    main="(b) Change in symbiont abundance vs. nitrogen",
+    xlab="Nitrogen (mol/L)", ylab="% of simulations")
+
+  # Prey
+  evenBarsHist(list(sim_recovery$X[unchanged], sim_recovery$X[tolToSen], sim_recovery$X[senToTol]),
+    breaks=seq(1e-7, 4e-7, 5e-8),
+    col=c(colEither, colSen, colTol),
+    main="(c) Change in symbiont abundance vs. prey",
+    xlab="Prey (mol/L)", ylab="% of simulations")
+
+  # Legend
+  plot.new()
+  par(mar=c(0,0,0,0))
+  legend("center", c("\nNo change\n", "Sensitive -> tolerant"), col=c(colEither, colTol), pch=15,
+    title="Change in more abundant symbiont from\nimmediately post-recovery to 1000 days\npost-bleaching",
+    bty="n")
+
+  dev.off()
+```
