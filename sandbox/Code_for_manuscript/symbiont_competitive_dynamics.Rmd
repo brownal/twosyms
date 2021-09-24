@@ -356,20 +356,20 @@ output:
 
   #### Plot competition outcome vs each environmental variable ####
 
-  stackedHist(data=list(sim_competition$L[(sim_competition$sup_competitor == "Sensitive")],
+  evenBarsHist(data=list(sim_competition$L[(sim_competition$sup_competitor == "Sensitive")],
     sim_competition$L[(sim_competition$sup_competitor == "Tolerant")],
     sim_competition$L[(sim_competition$sup_competitor == "No-survival")]),
     breaks=seq(5, 60, 2.5), xlim=c(5, 60), colors=c(colSen, colTol, colNS),
     xlab="Light (mol photons/m^2/day)", ylab="% Simulations", main="(b) Light")
 
 
-  stackedHist(data=list(sim_competition$N[(sim_competition$sup_competitor == "Sensitive")],
+  evenBarsHist(data=list(sim_competition$N[(sim_competition$sup_competitor == "Sensitive")],
     sim_competition$N[(sim_competition$sup_competitor == "Tolerant")],
     sim_competition$N[(sim_competition$sup_competitor == "No-survival")]),
     colors=c(colSen, colTol, colNS),
     xlab="Nitrogen (mol/L)", ylab="% Simulations", main="(c) Nitrogen")
 
-  stackedHist(data=list(sim_competition$X[(sim_competition$sup_competitor == "Sensitive")],
+  evenBarsHist(data=list(sim_competition$X[(sim_competition$sup_competitor == "Sensitive")],
     sim_competition$X[(sim_competition$sup_competitor == "Tolerant")],
     sim_competition$X[(sim_competition$sup_competitor == "No-survival")]),
     colors=c(colSen, colTol, colNS),
